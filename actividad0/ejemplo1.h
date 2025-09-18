@@ -3,6 +3,7 @@
 
 #include <QtGui>
 #include "ui_counterDlg.h"
+#include "timer.h"
 
 class ejemplo1 : public QWidget, public Ui_Counter
 {
@@ -14,9 +15,10 @@ class ejemplo1 : public QWidget, public Ui_Counter
         void doButton();
         void doStart();
         void doCount();
+        void setInterval();
 
     private:
-        QTimer timer;
+        Timer timer;
 
 
 };
