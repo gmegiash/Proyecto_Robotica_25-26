@@ -6,84 +6,62 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>484</width>
-    <height>383</height>
+    <width>771</width>
+    <height>494</height>
    </rect>
   </property>
   <property name="windowTitle">
    <string>Counter</string>
   </property>
-  <widget class="QPushButton" name="button">
-   <property name="geometry">
-    <rect>
-     <x>70</x>
-     <y>240</y>
-     <width>251</width>
-     <height>71</height>
-    </rect>
-   </property>
-   <property name="text">
-    <string>RESET</string>
-   </property>
-  </widget>
-  <widget class="QLCDNumber" name="lcdNumber">
-   <property name="geometry">
-    <rect>
-     <x>50</x>
-     <y>40</y>
-     <width>301</width>
-     <height>91</height>
-    </rect>
-   </property>
-  </widget>
-  <widget class="QPushButton" name="start">
-   <property name="geometry">
-    <rect>
-     <x>70</x>
-     <y>160</y>
-     <width>251</width>
-     <height>71</height>
-    </rect>
-   </property>
-   <property name="text">
-    <string>START</string>
-   </property>
-  </widget>
-  <widget class="QSlider" name="horizontalSlider">
-   <property name="geometry">
-    <rect>
-     <x>70</x>
-     <y>330</y>
-     <width>271</width>
-     <height>16</height>
-    </rect>
-   </property>
-   <property name="minimum">
-    <number>100</number>
-   </property>
-   <property name="maximum">
-    <number>10000</number>
-   </property>
-   <property name="singleStep">
-    <number>100</number>
-   </property>
-   <property name="pageStep">
-    <number>1000</number>
-   </property>
-   <property name="orientation">
-    <enum>Qt::Horizontal</enum>
-   </property>
-  </widget>
-  <widget class="QLCDNumber" name="lcdNumber_2">
-   <property name="geometry">
-    <rect>
-     <x>370</x>
-     <y>320</y>
-     <width>64</width>
-     <height>23</height>
-    </rect>
-   </property>
-  </widget>
+  <layout class="QVBoxLayout" name="verticalLayout_2">
+   <item>
+    <layout class="QVBoxLayout" name="verticalLayout">
+     <item>
+      <widget class="QLCDNumber" name="lcdNumber"/>
+     </item>
+     <item>
+      <widget class="QPushButton" name="start">
+       <property name="text">
+        <string>START</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="button">
+       <property name="text">
+        <string>RESET</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <layout class="QHBoxLayout" name="horizontalLayout">
+       <item>
+        <widget class="QSlider" name="horizontalSlider">
+         <property name="minimum">
+          <number>100</number>
+         </property>
+         <property name="maximum">
+          <number>10000</number>
+         </property>
+         <property name="singleStep">
+          <number>100</number>
+         </property>
+         <property name="pageStep">
+          <number>1000</number>
+         </property>
+         <property name="orientation">
+          <enum>Qt::Horizontal</enum>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QLCDNumber" name="lcdNumber_2"/>
+       </item>
+      </layout>
+     </item>
+    </layout>
+   </item>
+  </layout>
  </widget>
  <resources/>
  <connections/>
