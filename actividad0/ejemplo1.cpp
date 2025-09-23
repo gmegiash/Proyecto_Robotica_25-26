@@ -14,6 +14,7 @@ ejemplo1::ejemplo1(): Ui_Counter()
 	connect(button, SIGNAL(clicked()), this, SLOT(doButton()) );
 	connect(horizontalSlider, SIGNAL(valueChanged(int)), this, SLOT(setInterval()) );
 	timer.connect(std::bind(&ejemplo1::doCount,this));
+	setInterval();
 }
 
 void ejemplo1::doStart()
@@ -26,7 +27,7 @@ void ejemplo1::doStart()
 	}
 	else
 	{
-		timer.start(5);
+		timer.start();
 		running = true;
 		start->setText("STOP");
 	}

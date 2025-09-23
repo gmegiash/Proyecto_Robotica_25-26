@@ -28,7 +28,7 @@ public:
             }
         }).detach();
     };
-    void start(int startValue)
+    void start()
     {
         go.store(true);
     };
