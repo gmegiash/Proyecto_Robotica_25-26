@@ -5,6 +5,7 @@
 #include <map>
 #include <execution>
 #include <algorithm>
+#include <tuple>
 
 template<typename T>
 concept Callable = std::invocable<T>;
@@ -15,11 +16,17 @@ auto timer(T f)
     const auto start = std::chrono::high_resolution_clock::now();
     std::invoke(f);
     const auto end = std::chrono::high_resolution_clock::now();
+
     const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
     return ms;
 }
 
+template<typename... Args>
+int print(Args... args)
+{
+    return sizeof...(args);
 
+}
 
 // TIP To <b>Run</b> code, press <shortcut actionId="Run"/> or click the <icon src="AllIcons.Actions.Execute"/> icon in the gutter.
 int main()
@@ -52,6 +59,8 @@ int main()
        m.find(rand() % 10000000);
     });
     std::cout << b << std::endl;
+
+    std::cout << print(1, "hello", 3.14) << std::endl; // Outputs: 1 hello 3.14
     return 0;
     // TIP See CLion help at <a href="https://www.jetbrains.com/help/clion/">jetbrains.com/help/clion/</a>. Also, you can try interactive lessons for CLion by selecting 'Help | Learn IDE Features' from the main menu.
 }
