@@ -83,7 +83,15 @@ void SpecificWorker::compute()
 	try
 	{
 		auto data = laser_proxy->getLaserData();
-		qInfo() << data.size();
+
+		for (auto d: data)
+		{
+			if (d.dist <= 0.8)
+			{
+				qInfo() << d.dist;
+			}
+		}
+
 	}catch (const Ice::Exception &e)
 	{
 		std:: cout << e << " " << "Conexion con laser" << std::endl;
