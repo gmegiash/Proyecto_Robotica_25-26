@@ -80,23 +80,18 @@ void SpecificWorker::initialize()
 
 void SpecificWorker::compute()
 {
-    std::cout << "Compute worker" << std::endl;
-	//computeCODE
-	//try
-	//{
-	//  camera_proxy->getYImage(0,img, cState, bState);
-    //    if (img.empty())
-    //        emit goToEmergency()
-	//  memcpy(image_gray.data, &img[0], m_width*m_height*sizeof(uchar));
-	//  searchTags(image_gray);
-	//}
-	//catch(const Ice::Exception &e)
-	//{
-	//  std::cout << "Error reading from Camera" << e << std::endl;
-	//}
+	try
+	{
+		auto data = laser_proxy->getLaserData();
+		qInfo() << data.size();
+	}catch (const Ice::Exception &e)
+	{
+		std:: cout << e << " " << "Conexion con laser" << std::endl;
+	}
+
 }
 
-
+//////////////////////////////////////////////////////////////////////////////////////////////////////
 
 void SpecificWorker::emergency()
 {

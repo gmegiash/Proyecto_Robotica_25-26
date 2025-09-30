@@ -1,6 +1,6 @@
 # Proxies for required interfaces
-Proxies.DifferentialRobot = "differentialrobot:tcp -h localhost -p 0"
-Proxies.Laser = "laser:tcp -h localhost -p 0"
+Proxies.DifferentialRobot = "differentialrobot:tcp -h localhost -p 10004"
+Proxies.Laser = "laser:tcp -h localhost -p 10003"
 
 
 
