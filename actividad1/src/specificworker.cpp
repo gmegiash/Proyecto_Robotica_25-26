@@ -17,6 +17,8 @@
  *    along with RoboComp.  If not, see <http://www.gnu.org/licenses/>.
  */
 #include "specificworker.h"
+#include <cmath>
+#include <ranges>
 
 SpecificWorker::SpecificWorker(const ConfigLoader& configLoader, TuplePrx tprx, bool startup_check) : GenericWorker(configLoader, tprx)
 {
@@ -76,21 +78,24 @@ void SpecificWorker::initialize()
 
 }
 
-
+float normalizePoint(const RoboCompLidar3D::TPoint *point)
+{
+	return std::sqrt(point->x * point->x + point->y * point->y + point->z * point->z);
+}
 
 void SpecificWorker::compute()
 {
 	try
 	{
-		auto data = laser_proxy->getLaserData();
+		auto data = lidar3d_proxy->getLidarDataWithThreshold2d("helios",5000,1);
+		qInfo() << data.points.size();
 
-		for (auto d: data)
+		auto v = data.points | std::views::transform([](auto n)
 		{
-			if (d.dist <= 0.8)
-			{
-				qInfo() << d.dist;
-			}
-		}
+			return std::make_pair(n.theta, n);
+		});
+
+		qInfo() << v.size();
 
 	}catch (const Ice::Exception &e)
 	{
