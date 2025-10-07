@@ -17,8 +17,10 @@
  *    along with RoboComp.  If not, see <http://www.gnu.org/licenses/>.
  */
 #include "specificworker.h"
+#include "specificworker.h"
 #include <cmath>
 #include <ranges>
+#include <cppitertools/groupby.hpp>
 
 SpecificWorker::SpecificWorker(const ConfigLoader& configLoader, TuplePrx tprx, bool startup_check) : GenericWorker(configLoader, tprx)
 {
@@ -70,39 +72,73 @@ void SpecificWorker::initialize()
 {
     std::cout << "initialize worker" << std::endl;
 
-    //initializeCODE
+	this->dimensions = QRectF(-6000, -3000, 12000, 6000);
+	viewer = new AbstractGraphicViewer(this->frame, this->dimensions);
+	this->resize(900,450);
+	viewer->show();
+	const auto rob = viewer->add_robot(ROBOT_LENGTH, ROBOT_LENGTH, 0, 190, QColor("Blue"));
+	robot_polygon = std::get<0>(rob);
 
-    /////////GET PARAMS, OPEND DEVICES....////////
-    //int period = configLoader.get<int>("Period.Compute") //NOTE: If you want get period of compute use getPeriod("compute")
-    //std::string device = configLoader.get<std::string>("Device.name") 
+	connect(viewer, &AbstractGraphicViewer::new_mouse_coordinates, this, &SpecificWorker::new_target_slot);
 
 }
 
-float normalizePoint(const RoboCompLidar3D::TPoint *point)
-{
-	return std::sqrt(point->x * point->x + point->y * point->y + point->z * point->z);
-}
 
 void SpecificWorker::compute()
 {
+	qInfo() << "computing";
 	try
 	{
-		auto data = lidar3d_proxy->getLidarDataWithThreshold2d("helios",5000,1);
-		qInfo() << data.points.size();
+		auto data = lidar3d_proxy->getLidarDataWithThreshold2d("helios", 5000, 1);
 
-		auto v = data.points | std::views::transform([](auto n)
-		{
-			return std::make_pair(n.theta, n);
-		});
-
-		qInfo() << v.size();
-
-	}catch (const Ice::Exception &e)
-	{
-		std:: cout << e << " " << "Conexion con laser" << std::endl;
+		const auto filter_data = filter_min_distance_cppintertools(data.points);
 	}
-
+	catch (const Ice::Exception &e)
+	{
+		std::cout << e << " " << "Conexion con laser" << std::endl;
+	}
 }
+
+void SpecificWorker::draw_lidar(const auto &points, QGraphicsScene* scene)
+{
+	static std::vector<QGraphicsItem*> draw_points;
+	for (const auto &p : draw_points)
+	{
+		scene->removeItem(p);
+		delete p;
+	}
+	draw_points.clear();
+
+	const QColor color("LightGreen");
+	const QPen pen(color, 10);
+	//const QBrush brush(color, Qt::SolidPattern);
+	for (const auto &p : points)
+	{
+		const auto dp = scene->addRect(-25, -25, 50, 50, pen);
+		dp->setPos(p.x(), p.y());
+		draw_points.push_back(dp);   // add to the list of points to be deleted next time
+	}
+}
+
+void SpecificWorker::new_target_slot(QPointF p){}
+
+
+std::optional<RoboCompLidar3D::TPoints> SpecificWorker::filter_min_distance_cppintertools(const RoboCompLidar3D::TPoints &points)
+{
+	RoboCompLidar3D::TPoints result; result.reserve(points.size());
+
+	for (auto&& [angle, group] : iter::groupby(points, [](const auto& p)
+	{
+		float multiplier = std::pow(10.0f, 2); return std::floor(p.phi * multiplier) / multiplier;
+	}))
+	{
+		auto min_it = std::min_element(std::begin(group), std::end(group),
+			[](const auto& a, const auto& b){ return a.r < b.r; });
+		result.emplace_back(RoboCompLidar3D::TPoint{.x=min_it->x, .y=min_it->y, .phi=min_it->phi});
+	}
+	return result;
+}
+
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////
 
