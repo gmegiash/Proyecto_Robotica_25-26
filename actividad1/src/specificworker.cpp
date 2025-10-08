@@ -22,6 +22,13 @@
 #include <ranges>
 #include <cppitertools/groupby.hpp>
 
+//	Constantes de distancias
+const float MAX_ADV = 250.0f;      // velocidad avance
+const float MAX_ROT = 0.8f;        // velocidad rotación
+const float OBSTACLE_DIST = 1200;  // mm
+const float WALL_DIST = 800;       // mm
+
+
 SpecificWorker::SpecificWorker(const ConfigLoader& configLoader, TuplePrx tprx, bool startup_check) : GenericWorker(configLoader, tprx)
 {
 	this->startup_check_flag = startup_check;
@@ -89,11 +96,51 @@ void SpecificWorker::compute()
 	try
 	{
 		auto data = lidar3d_proxy->getLidarDataWithThreshold2d("helios", 5000, 1);
+		if (data.points.empty()) return;
 
 		const auto filter_data = filter_min_distance_cppintertools(data.points);
 		qInfo() << filter_data.value().size();
-		if (filter_data.has_value())
-			draw_lidar(filter_data.value(),&viewer->scene);
+		if (!filter_data.has_value())	return;
+
+		draw_lidar(filter_data.value(),&viewer->scene);
+
+		float distFrontal = 9999, distIzq = 9999, distDer = 9999;
+		for (const auto &p : data.points)
+		{
+			float angle = atan2(p.y, p.x);
+			float d = std::hypot(p.y, p.x);
+
+			if (std::abs(angle) < 0.3) distFrontal = std::min(distFrontal, d);
+			if (angle > 0.8 && angle < 1.2) distIzq = std::min(distIzq, d);
+			if (angle > -0.8 && angle < -1.2) distDer = std::min(distDer, d);
+		}
+
+		//	Máquina de estados
+		switch (state)
+		{
+			case State::FORWARD:
+				if (distFrontal > OBSTACLE_DIST)
+				{
+					state = State::TURN;
+					omnirobot_proxy->setSpeedBase(0,0,0);
+					qInfo() << "Obstaculo encontrado, girando...";
+					break;
+				}
+
+			case State::TURN:
+				if (distFrontal > OBSTACLE_DIST * 1.5)
+				{
+					state = State::FOLLOW_WALL;
+					qInfo() << "Sigue la corriente bro y no te separes de la pared...";
+					break;
+				}
+
+			case State::FOLLOW_WALL:
+				if (distDer < WALL_DIST * 0.8)
+				{
+					omnirobot_proxy->setSpeedBase(MAX_ADV * 0.8f, 0, 0.3f);
+				}
+		}
 
 		update_robot_position();
 	}
