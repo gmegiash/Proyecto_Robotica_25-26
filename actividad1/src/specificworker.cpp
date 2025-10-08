@@ -86,12 +86,16 @@ void SpecificWorker::initialize()
 
 void SpecificWorker::compute()
 {
-	qInfo() << "computing";
 	try
 	{
 		auto data = lidar3d_proxy->getLidarDataWithThreshold2d("helios", 5000, 1);
 
 		const auto filter_data = filter_min_distance_cppintertools(data.points);
+		qInfo() << filter_data.value().size();
+		if (filter_data.has_value())
+			draw_lidar(filter_data.value(),&viewer->scene);
+
+		update_robot_position();
 	}
 	catch (const Ice::Exception &e)
 	{
@@ -115,7 +119,7 @@ void SpecificWorker::draw_lidar(const auto &points, QGraphicsScene* scene)
 	for (const auto &p : points)
 	{
 		const auto dp = scene->addRect(-25, -25, 50, 50, pen);
-		dp->setPos(p.x(), p.y());
+		dp->setPos(p.x, p.y);
 		draw_points.push_back(dp);   // add to the list of points to be deleted next time
 	}
 }
@@ -137,6 +141,20 @@ std::optional<RoboCompLidar3D::TPoints> SpecificWorker::filter_min_distance_cppi
 		result.emplace_back(RoboCompLidar3D::TPoint{.x=min_it->x, .y=min_it->y, .phi=min_it->phi});
 	}
 	return result;
+}
+
+void SpecificWorker::update_robot_position()
+{
+	try
+	{
+		RoboCompGenericBase::TBaseState bState;
+		omnirobot_proxy->getBaseState(bState);
+		robot_polygon->setRotation(bState.alpha*180/M_PI);
+		robot_polygon->setPos(bState.x, bState.z);
+
+		std::cout << bState.alpha << " " << bState.x << " " << bState.z << std::endl;
+	}
+	catch (const Ice::Exception &e){std::cout << e.what() << std::endl;}
 }
 
 

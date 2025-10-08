@@ -95,6 +95,8 @@ private:
 
 	std::optional<RoboCompLidar3D::TPoints> filter_min_distance_cppintertools(const RoboCompLidar3D::TPoints &points);
 
+	void update_robot_position();
+
 	void draw_lidar(const auto &points, QGraphicsScene* scene);
 
 	/**
