@@ -41,11 +41,11 @@ SpecificWorker::SpecificWorker(const ConfigLoader& configLoader, TuplePrx tprx, 
 		#ifdef HIBERNATION_ENABLED
 			hibernationChecker.start(500);
 		#endif
-		
+
 		// Example statemachine:
 		/***
 		//Your definition for the statesmachine (if you dont want use a execute function, use nullptr)
-		states["CustomState"] = std::make_unique<GRAFCETStep>("CustomState", period, 
+		states["CustomState"] = std::make_unique<GRAFCETStep>("CustomState", period,
 															std::bind(&SpecificWorker::customLoop, this),  // Cyclic function
 															std::bind(&SpecificWorker::customEnter, this), // On-enter function
 															std::bind(&SpecificWorker::customExit, this)); // On-exit function
@@ -104,29 +104,21 @@ void SpecificWorker::compute()
 
 		draw_lidar(filter_data.value(),&viewer->scene);
 
-		float distFrontal = 9999, distIzq = 9999, distDer = 9999;
-		for (const auto &p : data.points)
-		{
-			float angle = atan2(p.y, p.x);
-			float d = std::hypot(p.x, p.y);
-			if (angle < (std::numbers::pi)*3/2 && angle > (std::numbers::pi)*1/2) distFrontal = std::min(distFrontal, d);
-			if (angle < -(std::numbers::pi)*7/2 || angle > (std::numbers::pi)*7/2) distIzq = std::min(distIzq, d);
-			if ((angle < (std::numbers::pi)*1/2 && angle > 0) || ( angle > -(std::numbers::pi)*1/2 && angle < 0)) distDer = std::min(distDer, d);
-		}
+		qInfo() << "distancia Frontal:" << calculateDistForward(data.points);
+		qInfo() << "Distancia derecha: "<< calculateDistRight(data.points);
+		qInfo() << "distancia izquierda:" << calculateDistLeft(data.points);
+		// qInfo() << "Distancia derecha: "<< calculateDistRight(filter_data.value()) << "distancia Frontal:" << calculateDistForward(filter_data.value()) <<"distancia izquierda:" << calculateDistLeft(filter_data.value());
 
+		// const QColor color2("aqua");
+		// const QColor color3("aqua");
+		// const auto dp1 = viewer->scene.addRect(-25, -25, 50, 50, QPen(QColor("aqua"), 10));
+		// const auto dp2 = viewer->scene.addRect(-25, -25, 50, 50, QPen(QColor("red"), 10));
+		// const auto dp3 = viewer->scene.addRect(-25, -25, 50, 50, QPen(QColor("yellow"), 10));
+		// dp1->setPos(0, distFrontal);
+		// dp2->setPos(distDer, 0);
+		// dp3->setPos(-distIzq, 0);
+		// qInfo() << "Distancia derecha: "<< distDer << "distancia Frontal:" << distFrontal <<"distancia izquierda:" << distIzq;
 
-
-		const QColor color2("aqua");
-		const QColor color3("aqua");
-		const auto dp1 = viewer->scene.addRect(-25, -25, 50, 50, QPen(QColor("aqua"), 10));
-		const auto dp2 = viewer->scene.addRect(-25, -25, 50, 50, QPen(QColor("red"), 10));
-		const auto dp3 = viewer->scene.addRect(-25, -25, 50, 50, QPen(QColor("yellow"), 10));
-		dp1->setPos(0, distFrontal);
-		dp2->setPos(distDer, 0);
-		dp3->setPos(-distIzq, 0);
-
-
-		qInfo() << "Distancia derecha: "<< distDer << "distancia Frontal:" << distFrontal <<"distancia izquierda:" << distIzq;
 		//	Máquina de estados
 		// switch (state)
 		// {
@@ -235,6 +227,49 @@ void SpecificWorker::update_robot_position()
 	}
 	catch (const Ice::Exception &e){std::cout << e.what() << std::endl;}
 }
+
+void SpecificWorker::forwardState()
+{
+	float distancia_Frontal;
+}
+
+void SpecificWorker::turnState()
+{
+
+}
+
+void SpecificWorker::follow_WallState()
+{
+
+}
+
+float SpecificWorker::calculateDistForward(const RoboCompLidar3D::TPoints &points)
+{
+	auto beginPoints = std::begin(points)+points.size()*3/8;
+	auto endPoints = std::end(points)-points.size()*3/8;
+	auto point = std::min_element(beginPoints, endPoints, [](const auto& a, const auto& b){ return a.r < b.r; });
+	return hypot(point->y, point->x);
+}
+
+float SpecificWorker::calculateDistLeft(const RoboCompLidar3D::TPoints &points)
+{
+	auto beginPoints = std::begin(points)+points.size()*5/8;
+	auto endPoints = std::end(points)-points.size()*1/8;
+	auto point = std::min_element(beginPoints, endPoints, [](const auto& a, const auto& b){ return a.r < b.r; });
+	return hypot(point->y, point->x);
+}
+
+float SpecificWorker::calculateDistRight(const RoboCompLidar3D::TPoints &points)
+{
+	auto beginPoints = std::begin(points)+points.size()*1/8;
+	auto endPoints = std::end(points)-points.size()*5/8;
+	auto point = std::min_element(beginPoints, endPoints, [](const auto& a, const auto& b){ return a.r < b.r; });
+	return hypot(point->y, point->x);
+}
+
+
+
+
 
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////

@@ -37,6 +37,8 @@
 /**
  * \brief Class SpecificWorker implements the core functionality of the component.
  */
+
+enum class State { FORWARD, TURN, FOLLOW_WALL };
 class SpecificWorker : public GenericWorker
 {
 Q_OBJECT
@@ -54,6 +56,13 @@ public:
      */
 	~SpecificWorker();
 
+	void forwardState();
+	void turnState();
+	void follow_WallState();
+
+	float calculateDistForward(const RoboCompLidar3D::TPoints &points);
+	float calculateDistRight(const RoboCompLidar3D::TPoints &points);
+	float calculateDistLeft(const RoboCompLidar3D::TPoints &points);
 
 public slots:
 
