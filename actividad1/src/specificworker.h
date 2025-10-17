@@ -36,10 +36,6 @@
 #include <cppitertools/enumerate.hpp>
 // #include <execution>
 
-#define distLeft 0
-#define distFront 1
-#define distRight 2
-
 /**
  * \brief Class SpecificWorker implements the core functionality of the component.
  */
@@ -61,15 +57,6 @@ public:
      * \brief Destructor for SpecificWorker.
      */
 	~SpecificWorker();
-
-	void forwardState(std::tuple<float,float,float> distances);
-	void turnState(std::tuple<float,float,float> distances);
-	void follow_WallState(std::tuple<float,float,float> distances);
-
-	float calculateDistForward(const RoboCompLidar3D::TPoints &points);
-	float calculateDistRight(const RoboCompLidar3D::TPoints &points);
-	float calculateDistLeft(const RoboCompLidar3D::TPoints &points);
-	std::tuple<float,float,float> calculateDistances(const RoboCompLidar3D::TPoints &points);
 
 public slots:
 
@@ -109,16 +96,32 @@ private:
 	const int ROBOT_LENGTH = 400;
 	QGraphicsPolygonItem *robot_polygon;
 
-	std::optional<RoboCompLidar3D::TPoints> filter_min_distance_cppintertools(const RoboCompLidar3D::TPoints &points);
-	RoboCompLidar3D::TPoints filter_isolated_points(const RoboCompLidar3D::TPoints &points, float d);
+	void draw_lidar(const auto &points, QGraphicsScene* scene);
+	void draw_collisions(QGraphicsScene* scene);
+	void update_robot_position();
 
+	// Distances
+	float front_distance;
+	float right_distance;
+	float left_distance;
+
+	void calculateDistancesOLD(const RoboCompLidar3D::TPoints &points);
+	void calculateDistances(const RoboCompLidar3D::TPoints &points);
+
+	// States
 	enum class State { FORWARD, TURN, FOLLOW_WALL };
 	State state = State::FORWARD;
 
+	void doStateMachine();
 
-	void update_robot_position();
+	void forwardState();
+	void turnState();
+	void follow_WallState();
 
-	void draw_lidar(const auto &points, QGraphicsScene* scene);
+
+
+	std::optional<RoboCompLidar3D::TPoints> filter_min_distance_cppintertools(const RoboCompLidar3D::TPoints &points);
+	RoboCompLidar3D::TPoints filter_isolated_points(const RoboCompLidar3D::TPoints &points, float d);
 
 	/**
      * \brief Flag indicating whether startup checks are enabled.

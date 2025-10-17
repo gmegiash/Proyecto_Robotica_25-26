@@ -23,7 +23,7 @@
 #include <cppitertools/groupby.hpp>
 
 //	Constantes de distancias
-const float MAX_ADV = 600.0f;      // velocidad avance
+const float MAX_ADV = 1000.0f;      // velocidad avance
 const float MAX_ROT = 0.8f;        // velocidad rotación
 const float OBSTACLE_DIST = 700;  // mm
 const float WALL_DIST = 700;       // mm
@@ -95,87 +95,20 @@ void SpecificWorker::compute()
 {
 	try
 	{
-		auto data = lidar3d_proxy->getLidarDataWithThreshold2d("helios", 50000, 1);
+		auto data = lidar3d_proxy->getLidarDataWithThreshold2d("helios", 5000, 1);
 		if (data.points.empty()) return;
 
 		const auto filter_data = filter_min_distance_cppintertools(data.points);
-		qInfo() << filter_data.value().size();
-		if (!filter_data.has_value())	return;
+		if (filter_data->empty())	return;
 
 		auto filter_values = filter_data.value();
 
+		calculateDistances(filter_values);
+
 		draw_lidar(filter_values,&viewer->scene);
+		draw_collisions(&viewer->scene);
 
-		auto distancias = calculateDistances(filter_values);
-		//
-		// qInfo() << "distancia Frontal:" << std::get<distFront>(distancias);
-		// qInfo() << "Distancia derecha: "<< std::get<distRight>(distancias);
-		// qInfo() << "distancia izquierda:" << std::get<distLeft>(distancias);
-
-		// qInfo() << "Distancia derecha: "<< calculateDistRight(filter_data.value()) << "distancia Frontal:" << calculateDistForward(filter_data.value()) <<"distancia izquierda:" << calculateDistLeft(filter_data.value());
-
-		// const QColor color2("aqua");
-		// const QColor color3("aqua");
-		// const auto dp1 = viewer->scene.addRect(-25, -25, 50, 50, QPen(QColor("aqua"), 10));
-		// const auto dp2 = viewer->scene.addRect(-25, -25, 50, 50, QPen(QColor("red"), 10));
-		// const auto dp3 = viewer->scene.addRect(-25, -25, 50, 50, QPen(QColor("yellow"), 10));
-		// dp1->setPos(0, distFrontal);
-		// dp2->setPos(distDer, 0);
-		// dp3->setPos(-distIzq, 0);
-		// qInfo() << "Distancia derecha: "<< distDer << "distancia Frontal:" << distFrontal <<"distancia izquierda:" << distIzq;
-
-		switch (state)
-		{
-			case State::FORWARD:
-			forwardState(distancias);
-				break;
-			case State::TURN:
-			turnState(distancias);
-				break;
-			case State::FOLLOW_WALL:
-				break;
-		}
-
-		//	Máquina de estados
-		// switch (state)
-		// {
-		// 	case State::FORWARD:
-
-		// 		} break;
-		//
-		// 	case State::TURN:
-		// 		static int count = 0;
-		// 		if (distFrontal > OBSTACLE_DIST * 2 && count > 10)
-		// 		{
-		// 			state = State::FOLLOW_WALL;
-		// 			qInfo() << "Sigue la corriente bro y no te separes de la pared...";
-		// 		} else{
-		// 			omnirobot_proxy->setSpeedBase(0,0,MAX_ROT);
-		// 			qInfo() << "Girando...";
-		// 			count++;
-		// 		} break;
-		//
-		// 	case State::FOLLOW_WALL:
-		// 		if (distDer < WALL_DIST * 0.8)
-		// 		{
-		// 			//Gira izquierda
-		// 			omnirobot_proxy->setSpeedBase(0, MAX_ADV * 0.8f, 0.3f);
-		// 		} else if (distDer > WALL_DIST * 1.2)
-		// 			{
-		// 			//Gira derecha
-		// 			omnirobot_proxy->setSpeedBase(0, MAX_ADV * 0.8f, -0.3f);
-		// 			} else{
-		// 			//Avanza recto
-		// 			omnirobot_proxy->setSpeedBase(0, MAX_ADV, 0);
-		// 			}
-		//
-		// 		if (distFrontal < OBSTACLE_DIST)
-		// 		{
-		// 			state = State::TURN;
-		// 		}
-		//
-		// 	break;
-		// }
+		//doStateMachine();
 
 		update_robot_position();
 	}
@@ -205,6 +138,44 @@ void SpecificWorker::draw_lidar(const auto &points, QGraphicsScene* scene)
 		draw_points.push_back(dp);   // add to the list of points to be deleted next time
 	}
 }
+
+void SpecificWorker::draw_collisions(QGraphicsScene* scene)
+{
+	static std::vector<QGraphicsItem*> draw_points;
+	for (const auto &p : draw_points)
+	{
+		scene->removeItem(p);
+		delete p;
+	}
+	draw_points.clear();
+
+	// FRONT LINE
+	QLineF frontLine(QPointF(-ROBOT_LENGTH/2, front_distance), QPointF(ROBOT_LENGTH/2, front_distance));
+	draw_points.push_back(scene->addLine(frontLine, QPen(QColor("Red"), 30)));
+
+	// RIGHT LINE
+	QLineF rightLine(QPointF(right_distance, ROBOT_LENGTH/2), QPointF(right_distance, -ROBOT_LENGTH/2));
+	draw_points.push_back(scene->addLine(rightLine, QPen(QColor("Red"), 30)));
+
+	// LEFT LINE
+	QLineF leftLine(QPointF(-left_distance, ROBOT_LENGTH/2), QPointF(-left_distance, -ROBOT_LENGTH/2));
+	draw_points.push_back(scene->addLine(leftLine, QPen(QColor("Red"), 30))); // LEFT
+}
+
+void SpecificWorker::update_robot_position()
+{
+	try
+	{
+		RoboCompGenericBase::TBaseState bState;
+		omnirobot_proxy->getBaseState(bState);
+		robot_polygon->setRotation(bState.alpha*180/M_PI);
+		robot_polygon->setPos(bState.x, bState.z);
+
+		std::cout << bState.alpha << " " << bState.x << " " << bState.z << std::endl;
+	}
+	catch (const Ice::Exception &e){std::cout << e.what() << std::endl;}
+}
+
 
 void SpecificWorker::new_target_slot(QPointF p){}
 
@@ -264,23 +235,84 @@ std::optional<RoboCompLidar3D::TPoints> SpecificWorker::filter_min_distance_cppi
 // }
 
 
-void SpecificWorker::update_robot_position()
-{
-	try
-	{
-		RoboCompGenericBase::TBaseState bState;
-		omnirobot_proxy->getBaseState(bState);
-		robot_polygon->setRotation(bState.alpha*180/M_PI);
-		robot_polygon->setPos(bState.x, bState.z);
 
-		std::cout << bState.alpha << " " << bState.x << " " << bState.z << std::endl;
+void SpecificWorker::calculateDistancesOLD(const RoboCompLidar3D::TPoints &points)
+{
+	float front_distance_aux = 9999, left_distance_aux = 9999, right_distance_aux = 9999;
+	for (const auto &p : points)
+	{
+		float angle = atan2(p.y, p.x);
+
+		float d = std::hypot(p.x, p.y);
+		if (angle < (std::numbers::pi)*9/16 && angle > (std::numbers::pi)*7/16) front_distance_aux = std::min(front_distance_aux, d);
+		if (angle < -(std::numbers::pi)*15/16 || angle > (std::numbers::pi)*15/16) left_distance_aux = std::min(left_distance_aux, d);
+		if ((angle < (std::numbers::pi)*1/16 && angle > 0) || ( angle > -(std::numbers::pi)*1/16 && angle < 0)) right_distance_aux = std::min(right_distance_aux, d);
 	}
-	catch (const Ice::Exception &e){std::cout << e.what() << std::endl;}
+
+	front_distance = front_distance_aux;
+	right_distance = right_distance_aux;
+	left_distance = left_distance_aux;
 }
 
-void SpecificWorker::forwardState(std::tuple<float,float,float> distances)
+void SpecificWorker::calculateDistances(const RoboCompLidar3D::TPoints &points)
 {
-	if (std::get<distFront>(distances) < OBSTACLE_DIST)
+	auto robot_section = ROBOT_LENGTH/2;
+	float front_Min = 9999*9999, left_Min = 9999*9999, right_Min = 9999*9999;
+	float pDistance;
+	for (const auto &point: points)
+	{
+		//FRONT
+		if (point.x < robot_section && point.x > -robot_section && point.y > 0)
+		{
+			pDistance = point.x*point.x + point.y*point.y;
+			if (pDistance < front_Min)	front_Min = pDistance;
+			continue;
+		}
+
+		// RIGHT
+		if (point.y < robot_section && point.y > -robot_section && point.x < 0)
+		{
+			pDistance = point.x*point.x + point.y*point.y;
+			if (pDistance < right_Min)	right_Min = pDistance;
+			continue;
+		}
+
+		// LEFT
+		if (point.y < robot_section && point.y > -robot_section && point.x > 0)
+		{
+			pDistance = point.x*point.x + point.y*point.y;
+			if (pDistance < left_Min)	left_Min = pDistance;
+			continue;
+		}
+	}
+
+	front_distance = sqrt(front_Min);
+	right_distance = sqrt(left_Min);
+	left_distance = sqrt(right_Min);
+
+	qInfo() << "distancia Frontal2:" << front_distance;
+	qInfo() << "Distancia derecha2: "<< right_distance;
+	qInfo() << "distancia izquierda2: " << left_distance;
+}
+
+void SpecificWorker::doStateMachine()
+{
+	switch (state)
+	{
+		case State::FORWARD:
+			forwardState();
+			break;
+		case State::TURN:
+			turnState();
+			break;
+		case State::FOLLOW_WALL:
+			break;
+	}
+}
+
+void SpecificWorker::forwardState()
+{
+	if (front_distance < OBSTACLE_DIST)
 	{
 		state = State::TURN;
 		omnirobot_proxy->setSpeedBase(0,0,0);
@@ -292,15 +324,15 @@ void SpecificWorker::forwardState(std::tuple<float,float,float> distances)
 
 }
 
-void SpecificWorker::turnState(std::tuple<float,float,float> distances)
+void SpecificWorker::turnState()
 {
-	if (std::get<distFront>(distances) > OBSTACLE_DIST * 2)
+	if (front_distance > OBSTACLE_DIST * 2)
 	{
-		state = State::FORWARD;
+		state = State::FOLLOW_WALL;
 		return;
 	}
 
-	if (std::get<distRight>(distances) > std::get<distLeft>(distances))
+	if (right_distance > left_distance)
 	{
 		omnirobot_proxy->setSpeedBase(0,0,MAX_ROT);
 	}
@@ -310,46 +342,19 @@ void SpecificWorker::turnState(std::tuple<float,float,float> distances)
 	}
 }
 
-void SpecificWorker::follow_WallState(std::tuple<float,float,float> distances)
+void SpecificWorker::follow_WallState()
 {
-
-}
-
-float SpecificWorker::calculateDistForward(const RoboCompLidar3D::TPoints &points)
-{
-	return std::get<distFront>(calculateDistances(points));
-}
-
-float SpecificWorker::calculateDistLeft(const RoboCompLidar3D::TPoints &points)
-{
-	return std::get<distLeft>(calculateDistances(points));
-}
-
-float SpecificWorker::calculateDistRight(const RoboCompLidar3D::TPoints &points)
-{
-	return std::get<distRight>(calculateDistances(points));
-}
-
-std::tuple<float,float,float> SpecificWorker::calculateDistances(const RoboCompLidar3D::TPoints &points)
-{
-	float distFrontal = 9999, distIzq = 9999, distDer = 9999;
-	for (const auto &p : points)
+	if (front_distance < OBSTACLE_DIST)
 	{
-		float angle = atan2(p.y, p.x);
-
-		float d = std::hypot(p.x, p.y);
-		if (angle < (std::numbers::pi)*9/16 && angle > (std::numbers::pi)*7/16) distFrontal = std::min(distFrontal, d);
-		if (angle < -(std::numbers::pi)*15/16 || angle > (std::numbers::pi)*15/16) distIzq = std::min(distIzq, d);
-		if ((angle < (std::numbers::pi)*1/16 && angle > 0) || ( angle > -(std::numbers::pi)*1/16 && angle < 0)) distDer = std::min(distDer, d);
+		state = State::TURN;
+		return;
 	}
 
-	qInfo() << "distancia Frontal:" << distFrontal;
-	qInfo() << "Distancia derecha: "<< distDer;
-	qInfo() << "distancia izquierda:" << distIzq;
+	if (right_distance < OBSTACLE_DIST || left_distance < OBSTACLE_DIST)
+	{
 
-	return {distIzq, distFrontal, distDer};
+	}
 }
-
 
 
 
