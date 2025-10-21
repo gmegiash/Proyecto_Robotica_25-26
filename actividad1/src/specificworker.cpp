@@ -23,9 +23,10 @@
 #include <cppitertools/groupby.hpp>
 
 //	Constantes de distancias
+#define width_distances 40
 const float MAX_ADV = 1000.0f;      // velocidad avance
 const float MAX_ROT = 0.8f;        // velocidad rotación
-const float OBSTACLE_DIST = 700;  // mm
+const float OBSTACLE_DIST = 600;  // mm
 const float WALL_DIST = 700;       // mm
 
 
@@ -108,7 +109,7 @@ void SpecificWorker::compute()
 		draw_lidar(filter_values,&viewer->scene);
 		draw_collisions(&viewer->scene);
 
-		//doStateMachine();
+		doStateMachine();
 
 		update_robot_position();
 	}
@@ -154,12 +155,18 @@ void SpecificWorker::draw_collisions(QGraphicsScene* scene)
 	draw_points.push_back(scene->addLine(frontLine, QPen(QColor("Red"), 30)));
 
 	// RIGHT LINE
-	QLineF rightLine(QPointF(right_distance, ROBOT_LENGTH/2), QPointF(right_distance, -ROBOT_LENGTH/2));
+	QLineF rightLine(QPointF(right_distance, width_distances), QPointF(right_distance, -width_distances));
 	draw_points.push_back(scene->addLine(rightLine, QPen(QColor("Red"), 30)));
 
 	// LEFT LINE
-	QLineF leftLine(QPointF(-left_distance, ROBOT_LENGTH/2), QPointF(-left_distance, -ROBOT_LENGTH/2));
+	QLineF leftLine(QPointF(-left_distance, width_distances), QPointF(-left_distance, -width_distances));
 	draw_points.push_back(scene->addLine(leftLine, QPen(QColor("Red"), 30))); // LEFT
+}
+
+
+void SpecificWorker::update_windows_values(QGraphicsScene* scene)
+{
+
 }
 
 void SpecificWorker::update_robot_position()
@@ -196,46 +203,6 @@ std::optional<RoboCompLidar3D::TPoints> SpecificWorker::filter_min_distance_cppi
 	return result;
 }
 
-// RoboCompLidar3D::TPoints SpecificWorker::filter_isolated_points(const RoboCompLidar3D::TPoints &points, float d)
-// {
-// 	if (points.empty()) return {};
-//
-// 	const float d_squared = d * d;  // Avoid sqrt by comparing squared distances
-// 	std::vector<bool> hasNeighbor(points.size(), false);
-//
-// 	// Create index vector for parallel iteration
-// 	std::vector<size_t> indices(points.size());
-// 	std::iota(indices.begin(), indices.end(), size_t{0});
-//
-// 	// Parallelize outer loop - each thread checks one point
-// 	std::for_each(std::execution::par, indices.begin(), indices.end(), [&](size_t i)
-// 		{
-// 			const auto& p1 = points[i];
-// 			// Sequential inner loop (avoid nested parallelism)
-// 			for (auto &&[j,p2] : iter::enumerate(points))
-// 			{
-// 				if (i == j) continue;
-// 				const float dx = p1.x - p2.x;
-// 				const float dy = p1.y - p2.y;
-// 				if (dx * dx + dy * dy <= d_squared)
-// 				{
-// 					hasNeighbor[i] = true;
-// 					break;
-// 				}
-// 			}
-// 	});
-//
-// 	// Collect results
-// 	std::vector<RoboCompLidar3D::TPoint> result;
-// 	result.reserve(points.size());
-// 	for (auto &&[i, p] : iter::enumerate(points))
-// 		if (hasNeighbor[i])
-// 			result.push_back(points[i]);
-// 	return result;
-// }
-
-
-
 void SpecificWorker::calculateDistancesOLD(const RoboCompLidar3D::TPoints &points)
 {
 	float front_distance_aux = 9999, left_distance_aux = 9999, right_distance_aux = 9999;
@@ -256,7 +223,7 @@ void SpecificWorker::calculateDistancesOLD(const RoboCompLidar3D::TPoints &point
 
 void SpecificWorker::calculateDistances(const RoboCompLidar3D::TPoints &points)
 {
-	auto robot_section = ROBOT_LENGTH/2;
+	auto robot_section = ROBOT_LENGTH/2+50;
 	float front_Min = 9999*9999, left_Min = 9999*9999, right_Min = 9999*9999;
 	float pDistance;
 	for (const auto &point: points)
@@ -270,15 +237,32 @@ void SpecificWorker::calculateDistances(const RoboCompLidar3D::TPoints &points)
 		}
 
 		// RIGHT
-		if (point.y < robot_section && point.y > -robot_section && point.x < 0)
-		{
-			pDistance = point.x*point.x + point.y*point.y;
-			if (pDistance < right_Min)	right_Min = pDistance;
-			continue;
+		if (point.y < ROBOT_LENGTH && point.y > -ROBOT_LENGTH && point.x < 0) {
+			// UPPER
+			if (point.y < width_distances*2 && point.y > width_distances)
+			{
+				pDistance = point.x*point.x + point.y*point.y;
+				if (pDistance < right_Min)	right_Min = pDistance;
+				continue;
+			}
+			// MIDDLE
+			if (point.y < width_distances && point.y > -width_distances)
+			{
+				pDistance = point.x*point.x + point.y*point.y;
+				if (pDistance < right_Min)	right_Min = pDistance;
+				continue;
+			}
+			// LOWER
+			if (point.y < -width_distances*2 && point.y > -width_distances)
+			{
+				pDistance = point.x*point.x + point.y*point.y;
+				if (pDistance < right_Min)	right_Min = pDistance;
+				continue;
+			}
 		}
 
 		// LEFT
-		if (point.y < robot_section && point.y > -robot_section && point.x > 0)
+		if (point.y < width_distances && point.y > -width_distances && point.x > 0)
 		{
 			pDistance = point.x*point.x + point.y*point.y;
 			if (pDistance < left_Min)	left_Min = pDistance;
@@ -290,9 +274,9 @@ void SpecificWorker::calculateDistances(const RoboCompLidar3D::TPoints &points)
 	right_distance = sqrt(left_Min);
 	left_distance = sqrt(right_Min);
 
-	qInfo() << "distancia Frontal2:" << front_distance;
-	qInfo() << "Distancia derecha2: "<< right_distance;
-	qInfo() << "distancia izquierda2: " << left_distance;
+	qInfo() << "distancia Frontal:" << front_distance;
+	qInfo() << "Distancia derecha: "<< right_distance;
+	qInfo() << "distancia izquierda: " << left_distance;
 }
 
 void SpecificWorker::doStateMachine()
@@ -319,18 +303,24 @@ void SpecificWorker::forwardState()
 		qInfo() << "Obstaculo encontrado, girando...";
 		return;
 	}
-
 	omnirobot_proxy->setSpeedBase(0,MAX_ADV,0);
-
 }
+
+static int time_to_turn = 10;
 
 void SpecificWorker::turnState()
 {
-	if (front_distance > OBSTACLE_DIST * 2)
+	if (front_distance > OBSTACLE_DIST)
 	{
-		state = State::FOLLOW_WALL;
+		state = State::FORWARD;
 		return;
 	}
+
+	if (time_to_turn++ < 10)
+	{
+		return;
+	}
+	time_to_turn = 0;
 
 	if (right_distance > left_distance)
 	{
@@ -350,9 +340,11 @@ void SpecificWorker::follow_WallState()
 		return;
 	}
 
+	omnirobot_proxy->setSpeedBase(0,MAX_ADV,0);
+
 	if (right_distance < OBSTACLE_DIST || left_distance < OBSTACLE_DIST)
 	{
-
+		state = State::TURN;
 	}
 }
 

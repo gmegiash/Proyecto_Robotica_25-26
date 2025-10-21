@@ -3,13 +3,14 @@ PROJECT( chocachoca )
 
 IF ( "$ENV{ROBOCOMP}" STREQUAL "")
   MESSAGE(WARNING "ROBOCOMP variable not set. Using the default value: /home/robocomp/robocomp")
-  SET (ENV{ROBOCOMP} "/home/ismael/robocomp/")
+  SET (ENV{ROBOCOMP} "/home/usuario/robocomp/")
 ENDIF ( "$ENV{ROBOCOMP}" STREQUAL "")
 
 SET(RC_COMPONENT_PATH ${CMAKE_CURRENT_SOURCE_DIR} CACHE STRING "component base path" FORCE)
 SET(RC_COMPONENT_DEVEL_PATH "${CMAKE_CURRENT_SOURCE_DIR}" CACHE STRING "component binary path" FORCE)
 #SET(RC_COMPONENT_DEVEL_PATH "${WORKSPACE_PATH}/devel"  CACHE STRING "component binary path")
 SET(RC_COMPONENT_INSTALL_PATH $ENV{ROBOCOMP} CACHE STRING "component install path")
+
 
 #commented as now devel is merged into source space
 #get_filename_component( COMPONENT_NAME ${CMAKE_CURRENT_SOURCE_DIR} DIRECTORY)

@@ -31,10 +31,10 @@
 // If you want to reduce the period automatically due to lack of use, you must uncomment the following line
 //#define HIBERNATION_ENABLED
 
+
 #include <genericworker.h>
 #include <abstract_graphic_viewer/abstract_graphic_viewer.h>
 #include <cppitertools/enumerate.hpp>
-// #include <execution>
 
 /**
  * \brief Class SpecificWorker implements the core functionality of the component.
@@ -98,6 +98,7 @@ private:
 
 	void draw_lidar(const auto &points, QGraphicsScene* scene);
 	void draw_collisions(QGraphicsScene* scene);
+	void update_windows_values(QGraphicsScene* scene);
 	void update_robot_position();
 
 	// Distances
