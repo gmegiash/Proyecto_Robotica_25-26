@@ -31,16 +31,20 @@
 // If you want to reduce the period automatically due to lack of use, you must uncomment the following line
 //#define HIBERNATION_ENABLED
 
-
 #include <genericworker.h>
 #include <abstract_graphic_viewer/abstract_graphic_viewer.h>
+#ifdef emit
+#undef emit
+#endif
 #include <cppitertools/enumerate.hpp>
+#include <execution>
+
 
 /**
  * \brief Class SpecificWorker implements the core functionality of the component.
  */
 
-enum class State { FORWARD, TURN, FOLLOW_WALL };
+enum class State { FORWARD, TURN, FOLLOW_WALL, SPIRAL};
 class SpecificWorker : public GenericWorker
 {
 Q_OBJECT
@@ -113,14 +117,15 @@ private:
 	void calculateDistances(const RoboCompLidar3D::TPoints &points);
 
 	// States
-	enum class State { FORWARD, TURN, FOLLOW_WALL };
-	State state = State::FORWARD;
+	//enum class State { FORWARD, TURN, FOLLOW_WALL, SPIRAL };
+	State state = State::SPIRAL;
 
 	void doStateMachine();
 
 	void forwardState();
 	void turnState();
 	void follow_WallState();
+	void spiralState();
 
 
 
