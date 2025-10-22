@@ -109,7 +109,7 @@ void SpecificWorker::compute()
 		draw_lidar(filter_values,&viewer->scene);
 		draw_collisions(&viewer->scene);
 
-		doStateMachine();
+		//doStateMachine();
 
 		update_robot_position();
 	}
@@ -224,59 +224,87 @@ void SpecificWorker::calculateDistancesOLD(const RoboCompLidar3D::TPoints &point
 void SpecificWorker::calculateDistances(const RoboCompLidar3D::TPoints &points)
 {
 	auto robot_section = ROBOT_LENGTH/2+50;
-	float front_Min = 9999*9999, left_Min = 9999*9999, right_Min = 9999*9999;
-	float pDistance;
+	float front_min = 9999, left_min = 9999, right_min = 9999;
+
+	RoboCompLidar3D::TPoint right_initPoint;	right_initPoint.x = 9999;
+	const RoboCompLidar3D::TPoint *rightUpper_point = &right_initPoint;
+	const RoboCompLidar3D::TPoint *rightLower_point = &right_initPoint;
+
+	RoboCompLidar3D::TPoint left_initPoint;	left_initPoint.x = -9999;
+	const RoboCompLidar3D::TPoint *leftUpper_point = &left_initPoint;
+	const RoboCompLidar3D::TPoint *leftLower_point = &left_initPoint;
 	for (const auto &point: points)
 	{
 		//FRONT
-		if (point.x < robot_section && point.x > -robot_section && point.y > 0)
+		if (point.x < robot_section && point.x > -robot_section && point.y >= 0)
 		{
-			pDistance = point.x*point.x + point.y*point.y;
-			if (pDistance < front_Min)	front_Min = pDistance;
+			if (point.y < front_min)	front_min = point.y;
 			continue;
 		}
 
 		// RIGHT
-		if (point.y < ROBOT_LENGTH && point.y > -ROBOT_LENGTH && point.x < 0) {
+		if (point.y < ROBOT_LENGTH && point.y > -ROBOT_LENGTH && point.x >= 0)
+		{
 			// UPPER
 			if (point.y < width_distances*2 && point.y > width_distances)
 			{
-				pDistance = point.x*point.x + point.y*point.y;
-				if (pDistance < right_Min)	right_Min = pDistance;
+				if (point.x < rightUpper_point->x)
+				{
+					rightUpper_point = &point;
+					qInfo() << "Hola";
+				}
 				continue;
 			}
 			// MIDDLE
 			if (point.y < width_distances && point.y > -width_distances)
 			{
-				pDistance = point.x*point.x + point.y*point.y;
-				if (pDistance < right_Min)	right_Min = pDistance;
+				if (point.x < right_min)	right_min = point.x;
 				continue;
 			}
 			// LOWER
-			if (point.y < -width_distances*2 && point.y > -width_distances)
+			if (point.y < -width_distances && point.y > -width_distances*2)
 			{
-				pDistance = point.x*point.x + point.y*point.y;
-				if (pDistance < right_Min)	right_Min = pDistance;
+				if (point.x < rightLower_point->x)	rightLower_point = &point;
 				continue;
 			}
 		}
 
 		// LEFT
-		if (point.y < width_distances && point.y > -width_distances && point.x > 0)
+		if (point.y < ROBOT_LENGTH && point.y > -ROBOT_LENGTH && point.x <= 0)
 		{
-			pDistance = point.x*point.x + point.y*point.y;
-			if (pDistance < left_Min)	left_Min = pDistance;
-			continue;
+			// UPPER
+			if (point.y < width_distances*2 && point.y > width_distances)
+			{
+				if (point.x > leftUpper_point->x)	leftUpper_point = &point;
+				continue;
+			}
+			// MIDDLE
+			if (point.y < width_distances && point.y > -width_distances)
+			{
+				if (-point.x < left_min)	left_min = -point.x;
+				continue;
+			}
+			// LOWER
+			if (point.y < -width_distances && point.y > -width_distances*2)
+			{
+				if (point.x > leftLower_point->x)	leftLower_point = &point;
+				continue;
+			}
 		}
 	}
 
-	front_distance = sqrt(front_Min);
-	right_distance = sqrt(left_Min);
-	left_distance = sqrt(right_Min);
+	front_distance = front_min;
+	right_distance = right_min;
+	left_distance = left_min;
+
+	right_angle = atan2(rightUpper_point->y - rightLower_point->y, rightUpper_point->x - rightLower_point->x) - M_PI_2;
+	left_angle = atan2(leftUpper_point->y - leftLower_point->y, leftUpper_point->x - leftLower_point->x) - M_PI_2;
 
 	qInfo() << "distancia Frontal:" << front_distance;
 	qInfo() << "Distancia derecha: "<< right_distance;
 	qInfo() << "distancia izquierda: " << left_distance;
+	qInfo() << "Right angle:" << right_angle;
+	qInfo() << "Left angle:" << left_angle;
 }
 
 void SpecificWorker::doStateMachine()

@@ -106,6 +106,9 @@ private:
 	float right_distance;
 	float left_distance;
 
+	double right_angle;
+	double left_angle;
+
 	void calculateDistancesOLD(const RoboCompLidar3D::TPoints &points);
 	void calculateDistances(const RoboCompLidar3D::TPoints &points);
 
