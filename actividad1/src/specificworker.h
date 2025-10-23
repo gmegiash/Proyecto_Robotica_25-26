@@ -44,6 +44,13 @@
  * \brief Class SpecificWorker implements the core functionality of the component.
  */
 
+//	Constantes de distancias
+#define width_distances 40
+const float MAX_ADV = 1000.0f;      // velocidad avance
+const float MAX_ROT = 1.0f;        // velocidad rotación
+const float OBSTACLE_DIST = 600;  // mm
+const float WALL_DIST = 700;       // mm
+
 enum class State { FORWARD, TURN, FOLLOW_WALL, SPIRAL};
 class SpecificWorker : public GenericWorker
 {
@@ -120,12 +127,18 @@ private:
 	//enum class State { FORWARD, TURN, FOLLOW_WALL, SPIRAL };
 	State state = State::SPIRAL;
 
+	double initRotation = MAX_ROT * 2;
+	double initVelocity = 100;
+	bool direccionGiro = true;
+
 	void doStateMachine();
 
 	void forwardState();
 	void turnState();
 	void follow_WallState();
 	void spiralState();
+
+	State stateRandomizer();
 
 
 

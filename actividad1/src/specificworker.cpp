@@ -22,12 +22,6 @@
 #include <ranges>
 #include <cppitertools/groupby.hpp>
 
-//	Constantes de distancias
-#define width_distances 40
-const float MAX_ADV = 1000.0f;      // velocidad avance
-const float MAX_ROT = 1.0f;        // velocidad rotación
-const float OBSTACLE_DIST = 600;  // mm
-const float WALL_DIST = 700;       // mm
 
 
 SpecificWorker::SpecificWorker(const ConfigLoader& configLoader, TuplePrx tprx, bool startup_check) : GenericWorker(configLoader, tprx)
@@ -301,6 +295,7 @@ void SpecificWorker::doStateMachine()
 			turnState();
 			break;
 		case State::FOLLOW_WALL:
+			follow_WallState();
 			break;
 	}
 }
@@ -322,7 +317,10 @@ void SpecificWorker::turnState()
 {
 	if (front_distance > OBSTACLE_DIST)
 	{
-		state = State::FORWARD;
+		direccionGiro = (rand() % 2 == 0);
+		initRotation = MAX_ROT * 2;
+		initVelocity = 50;
+		state = stateRandomizer();
 		return;
 	}
 
@@ -363,22 +361,40 @@ void SpecificWorker::follow_WallState()
 	}
 }
 
-static double initRotation = MAX_ROT;
-static double initVelocity = 50;
-
 void SpecificWorker::spiralState()
 {
-	if(front_distance < OBSTACLE_DIST)
+	if(front_distance < OBSTACLE_DIST || initRotation == 0)
 	{
 		omnirobot_proxy->setSpeedBase(0,0,0);
 		state = State::TURN;
 		return;
 	}
 
-	initRotation -= 0.005;
-	initVelocity += 3;
+	initRotation -= 0.0025;
+	initVelocity += 2;
 
-	omnirobot_proxy->setSpeedBase(0,initVelocity,initRotation);
+	if (direccionGiro)
+		omnirobot_proxy->setSpeedBase(0,initVelocity,initRotation);
+	else
+		omnirobot_proxy->setSpeedBase(0,initVelocity,-initRotation);
+
+
+
+}
+
+State SpecificWorker::stateRandomizer()
+{
+	int random_num = rand() % 3;
+	switch (random_num)
+	{
+	case 0:
+		return State::FORWARD;
+	case 1:
+		return State::FOLLOW_WALL;
+	case 2:
+		return State::SPIRAL;
+	}
+	return State::TURN;
 }
 
 
