@@ -46,10 +46,12 @@
 
 //	Constantes de distancias
 #define width_distances 40
-const float MAX_ADV = 1000.0f;      // velocidad avance
-const float MAX_ROT = 1.0f;        // velocidad rotación
-const float OBSTACLE_DIST = 600;  // mm
-const float WALL_DIST = 700;       // mm
+#define MAX_ADV 1000.0f      // velocidad avance
+#define MAX_ROT 1.0f        // velocidad rotación
+#define OBSTACLE_DIST 600  // mm
+#define WALL_DIST 700      // mm
+#define INIT_ROTATION 0.0f
+#define INIT_VELOCITY 750.0f
 
 enum class State { FORWARD, TURN, FOLLOW_WALL, SPIRAL};
 class SpecificWorker : public GenericWorker
@@ -127,8 +129,8 @@ private:
 	//enum class State { FORWARD, TURN, FOLLOW_WALL, SPIRAL };
 	State state = State::SPIRAL;
 
-	double initRotation = MAX_ROT * 2;
-	double initVelocity = 100;
+	double current_rotation = INIT_ROTATION;
+	double current_velocity = INIT_VELOCITY;
 	bool direccionGiro = true;
 
 	void doStateMachine();

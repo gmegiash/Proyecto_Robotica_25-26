@@ -318,8 +318,8 @@ void SpecificWorker::turnState()
 	if (front_distance > OBSTACLE_DIST)
 	{
 		direccionGiro = (rand() % 2 == 0);
-		initRotation = MAX_ROT * 2;
-		initVelocity = 50;
+		current_rotation = INIT_ROTATION;
+		current_velocity = INIT_VELOCITY;
 		state = stateRandomizer();
 		return;
 	}
@@ -363,23 +363,20 @@ void SpecificWorker::follow_WallState()
 
 void SpecificWorker::spiralState()
 {
-	if(front_distance < OBSTACLE_DIST || initRotation == 0)
+	if(front_distance < OBSTACLE_DIST || current_rotation < 0 || current_velocity < 10)
 	{
 		omnirobot_proxy->setSpeedBase(0,0,0);
 		state = State::TURN;
 		return;
 	}
 
-	initRotation -= 0.0025;
-	initVelocity += 2;
+	current_rotation += 0.0025;
+	current_velocity -= 1;
 
 	if (direccionGiro)
-		omnirobot_proxy->setSpeedBase(0,initVelocity,initRotation);
+		omnirobot_proxy->setSpeedBase(0,current_velocity,current_rotation);
 	else
-		omnirobot_proxy->setSpeedBase(0,initVelocity,-initRotation);
-
-
-
+		omnirobot_proxy->setSpeedBase(0,current_velocity,-current_rotation);
 }
 
 State SpecificWorker::stateRandomizer()
