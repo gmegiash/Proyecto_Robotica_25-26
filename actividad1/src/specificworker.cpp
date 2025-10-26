@@ -220,50 +220,46 @@ void SpecificWorker::calculateDistances(const RoboCompLidar3D::TPoints &points)
 		// RIGHT
 		if (point.y < ROBOT_LENGTH && point.y > -ROBOT_LENGTH && point.x >= 0)
 		{
-			// UPPER
-			if (point.y < width_distances*2 && point.y > width_distances)
-			{
-				if (point.x < rightUpper_point->x)
-				{
-					rightUpper_point = &point;
-				}
-				continue;
-			}
-			// MIDDLE
 			if (point.y < width_distances && point.y > -width_distances)
 			{
 				if (point.x < right_min)	right_min = point.x;
+				// UPPER
+				if (point.y < width_distances && point.y > 0)
+				{
+					if (point.x < rightUpper_point->x)	rightUpper_point = &point;
+					continue;
+				}
+				// LOWER
+				if (point.y < 0 && point.y > -width_distances)
+				{
+					if (point.x < rightLower_point->x)	rightLower_point = &point;
+				}
 				continue;
 			}
-			// LOWER
-			if (point.y < -width_distances && point.y > -width_distances*2)
-			{
-				if (point.x < rightLower_point->x)	rightLower_point = &point;
-				continue;
-			}
+			continue;
 		}
 
 		// LEFT
 		if (point.y < ROBOT_LENGTH && point.y > -ROBOT_LENGTH && point.x <= 0)
 		{
-			// UPPER
-			if (point.y < width_distances*2 && point.y > width_distances)
-			{
-				if (point.x > leftUpper_point->x)	leftUpper_point = &point;
-				continue;
-			}
 			// MIDDLE
 			if (point.y < width_distances && point.y > -width_distances)
 			{
 				if (-point.x < left_min)	left_min = -point.x;
+				// UPPER
+				if (point.y < width_distances && point.y > 0)
+				{
+					if (point.x > leftUpper_point->x)	leftUpper_point = &point;
+					continue;
+				}
+				// LOWER
+				if (point.y < 0 && point.y > -width_distances)
+				{
+					if (point.x > leftLower_point->x)	leftLower_point = &point;
+				}
 				continue;
 			}
-			// LOWER
-			if (point.y < -width_distances && point.y > -width_distances*2)
-			{
-				if (point.x > leftLower_point->x)	leftLower_point = &point;
-				continue;
-			}
+			continue;
 		}
 	}
 
@@ -271,8 +267,13 @@ void SpecificWorker::calculateDistances(const RoboCompLidar3D::TPoints &points)
 	right_distance = right_min;
 	left_distance = left_min;
 
-	right_angle = atan2(rightUpper_point->y - rightLower_point->y, rightUpper_point->x - rightLower_point->x) - M_PI_2;
-	left_angle = atan2(leftUpper_point->y - leftLower_point->y, leftUpper_point->x - leftLower_point->x) - M_PI_2;
+	right_angle = 0.0f;
+	left_angle = 0.0f;
+
+	if (rightUpper_point != &right_initPoint && rightLower_point != &right_initPoint)
+		right_angle = atan2(rightUpper_point->y - rightLower_point->y, rightUpper_point->x - rightLower_point->x) - M_PI_2;
+	if (leftUpper_point != &left_initPoint && leftLower_point != &left_initPoint)
+		left_angle = atan2(leftUpper_point->y - leftLower_point->y, leftUpper_point->x - leftLower_point->x) - M_PI_2;
 
 	qInfo() << "distancia Frontal:" << front_distance;
 	qInfo() << "Distancia derecha: "<< right_distance;
@@ -311,24 +312,16 @@ void SpecificWorker::forwardState()
 	omnirobot_proxy->setSpeedBase(0,MAX_ADV,0);
 }
 
-static int time_to_turn = 10;
-
 void SpecificWorker::turnState()
 {
 	if (front_distance > OBSTACLE_DIST)
 	{
-		direccionGiro = (rand() % 2 == 0);
+		right_turn = right_distance > left_distance;
 		current_rotation = INIT_ROTATION;
 		current_velocity = INIT_VELOCITY;
 		state = stateRandomizer();
 		return;
 	}
-
-	if (time_to_turn++ < 10)
-	{
-		return;
-	}
-	time_to_turn = 0;
 
 	if (right_distance > left_distance)
 	{
@@ -344,36 +337,42 @@ void SpecificWorker::follow_WallState()
 {
 	if (front_distance < OBSTACLE_DIST)
 	{
+		omnirobot_proxy->setSpeedBaseAsync(0, 0, 0);
 		state = State::TURN;
 		return;
 	}
 
-	if (right_angle < 0.1f || left_angle > 0.1f)
-	{
-		
-	}
+	const float Kp_angle = 1.0f;   // Para corrección de orientación
 
-	omnirobot_proxy->setSpeedBase(0,MAX_ADV,0);
+	// Calculamos corrección por ángulo
+	float rotation_angle_correction = 0.0f;
+	rotation_angle_correction -= Kp_angle * right_angle;
+	rotation_angle_correction -= Kp_angle * left_angle;
 
-	if (right_distance < OBSTACLE_DIST || left_distance < OBSTACLE_DIST)
-	{
-		state = State::TURN;
-	}
+	// Velocidad angular final
+	float rotation = rotation_angle_correction;
+
+	// Limitamos la velocidad de giro
+	if (rotation > MAX_ROT) rotation = MAX_ROT;
+	if (rotation < -MAX_ROT) rotation = -MAX_ROT;
+	if (rotation > -0.01f && rotation < 0.1f) rotation = 0;
+
+	omnirobot_proxy->setSpeedBaseAsync(0, MAX_ADV, rotation);
 }
 
 void SpecificWorker::spiralState()
 {
-	if(front_distance < OBSTACLE_DIST || current_rotation < 0 || current_velocity < 10)
+	if(front_distance < OBSTACLE_DIST || current_rotation >= 1.0f  || current_rotation <= -1.0f || current_velocity < 350)
 	{
 		omnirobot_proxy->setSpeedBase(0,0,0);
 		state = State::TURN;
 		return;
 	}
 
-	current_rotation += 0.0025;
-	current_velocity -= 1;
+	current_rotation += (MAX_ROT - current_rotation) * 0.05;
+	current_velocity *= 0.99;
 
-	if (direccionGiro)
+	if (right_turn)
 		omnirobot_proxy->setSpeedBase(0,current_velocity,current_rotation);
 	else
 		omnirobot_proxy->setSpeedBase(0,current_velocity,-current_rotation);
@@ -381,15 +380,13 @@ void SpecificWorker::spiralState()
 
 State SpecificWorker::stateRandomizer()
 {
-	int random_num = rand() % 3;
+	int random_num = rand() % 2;
 	switch (random_num)
 	{
 	case 0:
-		return State::FORWARD;
+		return State::SPIRAL;
 	case 1:
 		return State::FOLLOW_WALL;
-	case 2:
-		return State::SPIRAL;
 	}
 	return State::TURN;
 }

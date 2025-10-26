@@ -48,10 +48,10 @@
 #define width_distances 40
 #define MAX_ADV 1000.0f      // velocidad avance
 #define MAX_ROT 1.0f        // velocidad rotación
-#define OBSTACLE_DIST 600  // mm
-#define WALL_DIST 700      // mm
+#define OBSTACLE_DIST 750.0f  // mm
+#define WALL_DIST 700.0f      // mm
 #define INIT_ROTATION 0.0f
-#define INIT_VELOCITY 750.0f
+#define INIT_VELOCITY  1000.0f
 
 enum class State { FORWARD, TURN, FOLLOW_WALL, SPIRAL};
 class SpecificWorker : public GenericWorker
@@ -131,7 +131,7 @@ private:
 
 	double current_rotation = INIT_ROTATION;
 	double current_velocity = INIT_VELOCITY;
-	bool direccionGiro = true;
+	bool right_turn = true;
 
 	void doStateMachine();
 
