@@ -74,10 +74,11 @@ void SpecificWorker::initialize()
 {
     std::cout << "initialize worker" << std::endl;
 
+	this->setupUi(this);
 	this->dimensions = QRectF(-6000, -3000, 12000, 6000);
 	viewer = new AbstractGraphicViewer(this->frame, this->dimensions);
 	this->resize(900,450);
-	viewer->show();
+	this->show();
 	const auto rob = viewer->add_robot(ROBOT_LENGTH, ROBOT_LENGTH, 0, 190, QColor("Blue"));
 	robot_polygon = std::get<0>(rob);
 
@@ -88,9 +89,18 @@ void SpecificWorker::initialize()
 
 void SpecificWorker::compute()
 {
+	read_data();
+
+	//doStateMachine();
+
+	update_robot_position();
+}
+
+void SpecificWorker::read_data()
+{
 	try
 	{
-		auto data = lidar3d_proxy->getLidarDataWithThreshold2d("helios", 5000, 1);
+		auto data = lidar3d_proxy->getLidarDataWithThreshold2d("helios", 12000, 1);
 		if (data.points.empty()) return;
 
 		const auto filter_values = filter_isolated_points(data.points, 200);
@@ -100,10 +110,7 @@ void SpecificWorker::compute()
 
 		draw_lidar(filter_values,&viewer->scene);
 		draw_collisions(&viewer->scene);
-
-		doStateMachine();
-
-		update_robot_position();
+		update_windows_values();
 	}
 	catch (const Ice::Exception &e)
 	{
@@ -156,9 +163,13 @@ void SpecificWorker::draw_collisions(QGraphicsScene* scene)
 }
 
 
-void SpecificWorker::update_windows_values(QGraphicsScene* scene)
+void SpecificWorker::update_windows_values()
 {
-
+	this->lcdNumber_leftdist->display(left_distance);
+	this->lcdNumber_leftangle->display(left_angle);
+	this->lcdNumber_frontdist->display(front_distance);
+	this->lcdNumber_rightdist->display(right_distance);
+	this->lcdNumber_rightangle->display(right_angle);
 }
 
 void SpecificWorker::update_robot_position()
@@ -167,7 +178,7 @@ void SpecificWorker::update_robot_position()
 	{
 		RoboCompGenericBase::TBaseState bState;
 		omnirobot_proxy->getBaseState(bState);
-		robot_polygon->setRotation(bState.alpha*180/M_PI);
+		//robot_polygon->setRotation(bState.alpha*180/M_PI);
 		robot_polygon->setPos(bState.x, bState.z);
 
 		std::cout << bState.alpha << " " << bState.x << " " << bState.z << std::endl;
@@ -177,24 +188,6 @@ void SpecificWorker::update_robot_position()
 
 
 void SpecificWorker::new_target_slot(QPointF p){}
-
-void SpecificWorker::calculateDistancesOLD(const RoboCompLidar3D::TPoints &points)
-{
-	float front_distance_aux = 9999, left_distance_aux = 9999, right_distance_aux = 9999;
-	for (const auto &p : points)
-	{
-		float angle = atan2(p.y, p.x);
-
-		float d = std::hypot(p.x, p.y);
-		if (angle < (std::numbers::pi)*9/16 && angle > (std::numbers::pi)*7/16) front_distance_aux = std::min(front_distance_aux, d);
-		if (angle < -(std::numbers::pi)*15/16 || angle > (std::numbers::pi)*15/16) left_distance_aux = std::min(left_distance_aux, d);
-		if ((angle < (std::numbers::pi)*1/16 && angle > 0) || ( angle > -(std::numbers::pi)*1/16 && angle < 0)) right_distance_aux = std::min(right_distance_aux, d);
-	}
-
-	front_distance = front_distance_aux;
-	right_distance = right_distance_aux;
-	left_distance = left_distance_aux;
-}
 
 void SpecificWorker::calculateDistances(const RoboCompLidar3D::TPoints &points)
 {
@@ -274,12 +267,6 @@ void SpecificWorker::calculateDistances(const RoboCompLidar3D::TPoints &points)
 		right_angle = atan2(rightUpper_point->y - rightLower_point->y, rightUpper_point->x - rightLower_point->x) - M_PI_2;
 	if (leftUpper_point != &left_initPoint && leftLower_point != &left_initPoint)
 		left_angle = atan2(leftUpper_point->y - leftLower_point->y, leftUpper_point->x - leftLower_point->x) - M_PI_2;
-
-	qInfo() << "distancia Frontal:" << front_distance;
-	qInfo() << "Distancia derecha: "<< right_distance;
-	qInfo() << "distancia izquierda: " << left_distance;
-	qInfo() << "Right angle:" << right_angle;
-	qInfo() << "Left angle:" << left_angle;
 }
 
 void SpecificWorker::doStateMachine()

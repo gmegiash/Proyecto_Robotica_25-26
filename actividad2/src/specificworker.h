@@ -103,6 +103,9 @@ public slots:
 
 
 private:
+	// Data
+	void read_data();
+
 	// graphics
 	QRectF dimensions;
 	AbstractGraphicViewer *viewer;
@@ -111,7 +114,7 @@ private:
 
 	void draw_lidar(const auto &points, QGraphicsScene* scene);
 	void draw_collisions(QGraphicsScene* scene);
-	void update_windows_values(QGraphicsScene* scene);
+	void update_windows_values();
 	void update_robot_position();
 
 	// Distances
@@ -122,7 +125,6 @@ private:
 	double right_angle;
 	double left_angle;
 
-	void calculateDistancesOLD(const RoboCompLidar3D::TPoints &points);
 	void calculateDistances(const RoboCompLidar3D::TPoints &points);
 
 	// States
