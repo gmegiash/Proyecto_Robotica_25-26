@@ -77,10 +77,18 @@ void SpecificWorker::initialize()
 	this->setupUi(this);
 	this->dimensions = QRectF(-6000, -3000, 12000, 6000);
 	viewer = new AbstractGraphicViewer(this->frame, this->dimensions);
+	viewer_room = new AbstractGraphicViewer(this->frame_room, nominal_room.rect);
 	this->resize(900,450);
 	this->show();
 	const auto rob = viewer->add_robot(ROBOT_LENGTH, ROBOT_LENGTH, 0, 190, QColor("Blue"));
 	robot_polygon = std::get<0>(rob);
+	const auto rob_room= viewer_room->add_robot(ROBOT_LENGTH, ROBOT_LENGTH, 0, 190, QColor("Blue"));
+	room_draw_robot = std::get<0>(rob_room);
+	viewer_room->scene.addRect(nominal_room.rect, QPen(Qt::black, 30));
+	viewer_room->fitInView(nominal_room.rect, Qt::KeepAspectRatio);
+
+	robot_pose.setIdentity();
+	robot_pose.translate(Eigen::Vector2d(0.0,0.0));
 
 	connect(viewer, &AbstractGraphicViewer::new_mouse_coordinates, this, &SpecificWorker::new_target_slot);
 
@@ -103,13 +111,50 @@ void SpecificWorker::read_data()
 		auto data = lidar3d_proxy->getLidarDataWithThreshold2d("helios", 12000, 1);
 		if (data.points.empty()) return;
 
-		const auto filter_values = filter_isolated_points(data.points, 200);
-		if (filter_values.empty())	return;
+		//const auto filter_values = filter_isolated_points(data.points, 200);
+		//if (filter_values.empty())	return;
 
-		calculateDistances(filter_values);
-
+		const auto &filter_values = data.points;
+		//calculateDistances(filter_values);
+		
 		draw_lidar(filter_values,&viewer->scene);
-		draw_collisions(&viewer->scene);
+
+		auto measurements_corners = room_detector.compute_corners(filter_values, &viewer->scene);
+		auto nominal_corners_on_robot_frame = nominal_room.transform_corners_to(robot_pose.inverse());
+		auto hungarian_match =  hungarian.match(measurements_corners, nominal_corners_on_robot_frame, 1000);
+
+		Eigen::MatrixXd W(nominal_room.corners.size() * 2, 3);
+		Eigen:: VectorXd b(nominal_room.corners.size() * 2);
+
+		for (auto &&[i, m]: hungarian_match | iter::enumerate)
+		{
+			auto &[meas_c, nom_c, distance] = m;
+			auto &[p_meas, __, ___] = meas_c;
+			auto &[p_nom, ____, _____] = nom_c;
+			b(2 * i) = p_nom.x() - p_meas.x();
+			b(2 * i + 1) = p_nom.y() - p_meas.y();
+			W.block<1, 3>(2 * i, 0) << 1.0, 0.0, -p_meas.y();
+			W.block<1, 3>(2 * i +1, 0) << 0.0, 1.0, p_meas.x();
+
+			qInfo() << p_meas << p_nom << distance;
+		}
+		qInfo() << "-----";
+		const Eigen::Vector3d r = (W.transpose() * W).inverse() * W.transpose() * b;
+		W.transpose() * b;
+		// std::cout << r << std::endl;
+		// qInfo() << "--------------------";
+
+		if (r.array().isNaN().any())
+			return;
+
+		robot_pose.translate(Eigen::Vector2d(r(0), r(1)));
+		robot_pose.rotate(r[2]);
+
+		room_draw_robot->setPos(robot_pose.translation().x(), robot_pose.translation().y());
+		double angle = std::atan2(robot_pose.rotation()(1, 0), robot_pose.rotation()(0, 0));
+		room_draw_robot->setRotation(qRadiansToDegrees(angle));
+
+		//draw_collisions(&viewer->scene);
 		update_windows_values();
 	}
 	catch (const Ice::Exception &e)
@@ -136,6 +181,15 @@ void SpecificWorker::draw_lidar(const auto &points, QGraphicsScene* scene)
 		const auto dp = scene->addRect(-25, -25, 50, 50, pen);
 		dp->setPos(p.x, p.y);
 		draw_points.push_back(dp);   // add to the list of points to be deleted next time
+	}
+
+
+	const QColor color2("cyan");
+	for(const auto &[p, _, __] : nominal_room.transform_corners_to(robot_pose.inverse()))
+	{
+		const auto i = scene->addEllipse(-100, -100, 200, 200, QPen(color2), QBrush(color2));
+		i->setPos(p.x(), p.y());
+		draw_points.push_back(i);
 	}
 }
 
@@ -170,6 +224,21 @@ void SpecificWorker::update_windows_values()
 	this->lcdNumber_frontdist->display(front_distance);
 	this->lcdNumber_rightdist->display(right_distance);
 	this->lcdNumber_rightangle->display(right_angle);
+	switch (state)
+	{
+		case State::FOLLOW_WALL:
+			this->label_state->text() = "Follow Wall";
+			break;
+		case State::FORWARD:
+			this->label_state->text() = "Forward";
+			break;
+		case State::SPIRAL:
+			this->label_state->text() = "Spiral";
+			break;
+		case State::TURN:
+			this->label_state->text() = "Turn";
+			break;
+	}
 }
 
 void SpecificWorker::update_robot_position()

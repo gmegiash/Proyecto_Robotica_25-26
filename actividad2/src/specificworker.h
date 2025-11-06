@@ -38,7 +38,10 @@
 #endif
 #include <cppitertools/enumerate.hpp>
 #include <execution>
-
+#include "common_types.h"
+#include "hungarian.h"
+#include "ransac_line_detector.h"
+#include "room_detector.h"
 
 /**
  * \brief Class SpecificWorker implements the core functionality of the component.
@@ -52,6 +55,26 @@
 #define WALL_DIST 700.0f      // mm
 #define INIT_ROTATION 0.0f
 #define INIT_VELOCITY  1000.0f
+
+struct NominalRoom
+{
+	float width; //  mm
+	float length;
+	Corners corners;
+	QRectF rect{-5000, -2500, 10000,5000};
+	explicit NominalRoom(const float width_=10000.f, const float length_=5000.f, Corners  corners_ = {}) : width(width_), length(length_), corners(std::move(corners_)){};
+	Corners transform_corners_to(const Eigen::Affine2d &transform) const  // for room to robot pass the inverse of robot_pose
+	{
+		Corners transformed_corners;
+		for(const auto &[p, _, __] : corners)
+		{
+			auto ep = Eigen::Vector2d{p.x(), p.y()};
+			Eigen::Vector2d tp = transform * ep;
+			transformed_corners.emplace_back(QPointF{static_cast<float>(tp.x()), static_cast<float>(tp.y())}, 0.f, 0.f);
+		}
+		return transformed_corners;
+	}
+};
 
 enum class State { FORWARD, TURN, FOLLOW_WALL, SPIRAL};
 class SpecificWorker : public GenericWorker
@@ -104,13 +127,32 @@ public slots:
 
 private:
 	// Data
+	NominalRoom nominal_room{
+		10000.f, 5000.f,
+		{
+					{QPointF{-5000.f, -2500.f}, 0.f, 0.f},
+					{QPointF{5000.f, -2500.f}, 0.f, 0.f},
+					{QPointF{5000.f, 2500.f}, 0.f, 0.f},
+					{QPointF{-5000.f, 2500.f}, 0.f, 0.f}
+		}
+	};
+	Eigen::Affine2d robot_pose;
+	rc::Room_Detector room_detector;
+	rc::Hungarian hungarian;
+
 	void read_data();
+
 
 	// graphics
 	QRectF dimensions;
-	AbstractGraphicViewer *viewer;
 	const int ROBOT_LENGTH = 400;
-	QGraphicsPolygonItem *robot_polygon;
+		// robot perspective
+		AbstractGraphicViewer *viewer;
+		QGraphicsPolygonItem *robot_polygon;
+		// nominal perspective
+		AbstractGraphicViewer *viewer_room;
+		QGraphicsPolygonItem *room_draw_robot;
+
 
 	void draw_lidar(const auto &points, QGraphicsScene* scene);
 	void draw_collisions(QGraphicsScene* scene);
@@ -157,5 +199,6 @@ private:
 signals:
 	//void customSignal();
 };
+
 
 #endif
