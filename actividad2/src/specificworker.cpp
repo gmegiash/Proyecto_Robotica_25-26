@@ -90,6 +90,7 @@ void SpecificWorker::initialize()
 	robot_pose.setIdentity();
 	robot_pose.translate(Eigen::Vector2d(0.0,0.0));
 
+	connect(pushButton_startstop, SIGNAL(clicked()), this, SLOT(doStartStop()));
 	connect(viewer, &AbstractGraphicViewer::new_mouse_coordinates, this, &SpecificWorker::new_target_slot);
 
 }
@@ -99,7 +100,7 @@ void SpecificWorker::compute()
 {
 	read_data();
 
-	//doStateMachine();
+	doStateMachine();
 
 	update_robot_position();
 }
@@ -111,17 +112,16 @@ void SpecificWorker::read_data()
 		auto data = lidar3d_proxy->getLidarDataWithThreshold2d("helios", 12000, 1);
 		if (data.points.empty()) return;
 
-		//const auto filter_values = filter_isolated_points(data.points, 200);
-		//if (filter_values.empty())	return;
+		const auto filter_values = filter_isolated_points(data.points, 200);
+		if (filter_values.empty())	return;
 
-		const auto &filter_values = data.points;
-		//calculateDistances(filter_values);
+		calculateDistances(filter_values);
 		
 		draw_lidar(filter_values,&viewer->scene);
 
 		auto measurements_corners = room_detector.compute_corners(filter_values, &viewer->scene);
 		auto nominal_corners_on_robot_frame = nominal_room.transform_corners_to(robot_pose.inverse());
-		auto hungarian_match =  hungarian.match(measurements_corners, nominal_corners_on_robot_frame, 1000);
+		auto hungarian_match =  hungarian.match(measurements_corners, nominal_corners_on_robot_frame);
 
 		Eigen::MatrixXd W(nominal_room.corners.size() * 2, 3);
 		Eigen:: VectorXd b(nominal_room.corners.size() * 2);
@@ -154,7 +154,7 @@ void SpecificWorker::read_data()
 		double angle = std::atan2(robot_pose.rotation()(1, 0), robot_pose.rotation()(0, 0));
 		room_draw_robot->setRotation(qRadiansToDegrees(angle));
 
-		//draw_collisions(&viewer->scene);
+		draw_collisions(&viewer->scene);
 		update_windows_values();
 	}
 	catch (const Ice::Exception &e)
@@ -227,18 +227,24 @@ void SpecificWorker::update_windows_values()
 	switch (state)
 	{
 		case State::FOLLOW_WALL:
-			this->label_state->text() = "Follow Wall";
+			this->label_state->setText("Follow Wall");
 			break;
 		case State::FORWARD:
-			this->label_state->text() = "Forward";
+			this->label_state->setText("Forward");
 			break;
 		case State::SPIRAL:
-			this->label_state->text() = "Spiral";
+			this->label_state->setText("Spiral");
 			break;
 		case State::TURN:
-			this->label_state->text() = "Turn";
+			this->label_state->setText("Turn");
+			break;
+		default:
+			this->label_state->setText("Off");
 			break;
 	}
+	this->lcdNumber_xpos->display(robot_pose.translation().x());
+	this->lcdNumber_ypos->display(robot_pose.translation().y());
+	this->lcdNumber_angle->display(qRadiansToDegrees(std::atan2(robot_pose.rotation()(1, 0), robot_pose.rotation()(0, 0))));
 }
 
 void SpecificWorker::update_robot_position()
@@ -353,6 +359,8 @@ void SpecificWorker::doStateMachine()
 			break;
 		case State::FOLLOW_WALL:
 			follow_WallState();
+			break;
+		case State::OFF:
 			break;
 	}
 }
@@ -534,6 +542,18 @@ int SpecificWorker::startup_check()
 	return 0;
 }
 
+void SpecificWorker::doStartStop()
+{
+	if (state == State::OFF)
+	{
+		state = stateRandomizer();
+		this->pushButton_startstop->setText("Stop");
+		return;
+	}
+
+	state = State::OFF;
+	this->pushButton_startstop->setText("Start");
+}
 
 
 /**************************************/

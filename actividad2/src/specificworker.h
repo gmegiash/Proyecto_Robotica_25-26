@@ -76,7 +76,7 @@ struct NominalRoom
 	}
 };
 
-enum class State { FORWARD, TURN, FOLLOW_WALL, SPIRAL};
+enum class State { FORWARD, TURN, FOLLOW_WALL, SPIRAL, OFF };
 class SpecificWorker : public GenericWorker
 {
 Q_OBJECT
@@ -121,6 +121,8 @@ public slots:
      * \return An integer representing the result of the checks.
      */
 	int startup_check();
+
+	void doStartStop();
 
 	void new_target_slot(QPointF);
 
@@ -171,7 +173,7 @@ private:
 
 	// States
 	//enum class State { FORWARD, TURN, FOLLOW_WALL, SPIRAL };
-	State state = State::SPIRAL;
+	State state = State::OFF;
 
 	double current_rotation = INIT_ROTATION;
 	double current_velocity = INIT_VELOCITY;

@@ -312,16 +312,21 @@ void SpecificWorker::forwardState()
 	omnirobot_proxy->setSpeedBase(0,MAX_ADV,0);
 }
 
+static bool rotating = false;
+
 void SpecificWorker::turnState()
 {
 	if (front_distance > OBSTACLE_DIST)
 	{
+		rotating = false;
 		right_turn = right_distance > left_distance;
 		current_rotation = INIT_ROTATION;
 		current_velocity = INIT_VELOCITY;
 		state = stateRandomizer();
 		return;
 	}
+
+	if (rotating)	return;
 
 	if (right_distance > left_distance)
 	{
@@ -331,6 +336,8 @@ void SpecificWorker::turnState()
 	{
 		omnirobot_proxy->setSpeedBase(0,0,-MAX_ROT);
 	}
+	rotating = true;
+
 }
 
 void SpecificWorker::follow_WallState()
