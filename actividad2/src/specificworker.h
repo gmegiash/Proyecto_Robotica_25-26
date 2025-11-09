@@ -48,13 +48,13 @@
  */
 
 //	Constantes de distancias
-#define width_distances 40
-#define MAX_ADV 1000.0f      // velocidad avance
-#define MAX_ROT 1.0f        // velocidad rotación
+#define ROBOT_LENGTH 400
+#define robot_section (ROBOT_LENGTH/2 + 75)
+#define WIDTH_DISTANCES 40
+#define MAX_ADV 800.0f      // velocidad avance
+#define MAX_ROT 0.6125f        // velocidad rotación
 #define OBSTACLE_DIST 750.0f  // mm
 #define WALL_DIST 700.0f      // mm
-#define INIT_ROTATION 0.0f
-#define INIT_VELOCITY  1000.0f
 
 struct NominalRoom
 {
@@ -77,6 +77,7 @@ struct NominalRoom
 };
 
 enum class State { FORWARD, TURN, FOLLOW_WALL, SPIRAL, OFF };
+enum class RotationDirection { RIGHT, NONE, LEFT };
 class SpecificWorker : public GenericWorker
 {
 Q_OBJECT
@@ -142,12 +143,11 @@ private:
 	rc::Room_Detector room_detector;
 	rc::Hungarian hungarian;
 
+	RoboCompLidar3D::TPoints filter_isolated_points(const RoboCompLidar3D::TPoints &points, float d);
 	void read_data();
-
 
 	// graphics
 	QRectF dimensions;
-	const int ROBOT_LENGTH = 400;
 		// robot perspective
 		AbstractGraphicViewer *viewer;
 		QGraphicsPolygonItem *robot_polygon;
@@ -156,8 +156,8 @@ private:
 		QGraphicsPolygonItem *room_draw_robot;
 
 
-	void draw_lidar(const auto &points, QGraphicsScene* scene);
-	void draw_collisions(QGraphicsScene* scene);
+	void draw_lidar(const auto &points);
+	void draw_collisions();
 	void update_windows_values();
 	void update_robot_position();
 
@@ -171,27 +171,24 @@ private:
 
 	void calculateDistances(const RoboCompLidar3D::TPoints &points);
 
-	// States
-	//enum class State { FORWARD, TURN, FOLLOW_WALL, SPIRAL };
+	// Movements
 	State state = State::OFF;
 
-	double current_rotation = INIT_ROTATION;
-	double current_velocity = INIT_VELOCITY;
-	bool right_turn = true;
+	double rotation = 0;
+	double advance = 0;
+	RotationDirection rotation_direction = RotationDirection::NONE;
+
+	void set_robot_speed(float advx, float advy, float rot);
+	RotationDirection evaluate_rotation_direction(float rot);
 
 	void doStateMachine();
 
-	void forwardState();
-	void turnState();
-	void follow_WallState();
-	void spiralState();
+	void forward_state();
+	void turn_state();
+	void followWall_state();
+	void spiral_state();
 
 	State stateRandomizer();
-
-
-
-	std::optional<RoboCompLidar3D::TPoints> filter_min_distance_cppintertools(const RoboCompLidar3D::TPoints &points);
-	RoboCompLidar3D::TPoints filter_isolated_points(const RoboCompLidar3D::TPoints &points, float d);
 
 	/**
      * \brief Flag indicating whether startup checks are enabled.

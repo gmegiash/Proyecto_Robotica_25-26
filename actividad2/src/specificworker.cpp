@@ -105,6 +105,44 @@ void SpecificWorker::compute()
 	update_robot_position();
 }
 
+RoboCompLidar3D::TPoints SpecificWorker::filter_isolated_points(const RoboCompLidar3D::TPoints &points, float d) // set to 200mm
+{
+	if (points.empty()) return {};
+
+	const float d_squared = d * d;  // Avoid sqrt by comparing squared distances
+	std::vector<bool> hasNeighbor(points.size(), false);
+
+	// Create index vector for parallel iteration
+	std::vector<size_t> indices(points.size());
+	std::iota(indices.begin(), indices.end(), size_t{0});
+
+	// Parallelize outer loop - each thread checks one point
+	std::for_each(std::execution::par, indices.begin(), indices.end(), [&](size_t i)
+		{
+			const auto& p1 = points[i];
+			// Sequential inner loop (avoid nested parallelism)
+			for (auto &&[j,p2] : iter::enumerate(points))
+			{
+				if (i == j) continue;
+				const float dx = p1.x - p2.x;
+				const float dy = p1.y - p2.y;
+				if (dx * dx + dy * dy <= d_squared)
+				{
+					hasNeighbor[i] = true;
+					break;
+				}
+			}
+	});
+
+	// Collect results
+	std::vector<RoboCompLidar3D::TPoint> result;
+	result.reserve(points.size());
+	for (auto &&[i, p] : iter::enumerate(points))
+		if (hasNeighbor[i])
+			result.push_back(points[i]);
+	return result;
+}
+
 void SpecificWorker::read_data()
 {
 	try
@@ -117,7 +155,7 @@ void SpecificWorker::read_data()
 
 		calculateDistances(filter_values);
 		
-		draw_lidar(filter_values,&viewer->scene);
+		draw_lidar(filter_values);
 
 		auto measurements_corners = room_detector.compute_corners(filter_values, &viewer->scene);
 		auto nominal_corners_on_robot_frame = nominal_room.transform_corners_to(robot_pose.inverse());
@@ -136,7 +174,7 @@ void SpecificWorker::read_data()
 			W.block<1, 3>(2 * i, 0) << 1.0, 0.0, -p_meas.y();
 			W.block<1, 3>(2 * i +1, 0) << 0.0, 1.0, p_meas.x();
 
-			qInfo() << p_meas << p_nom << distance;
+			// qInfo() << p_meas << p_nom << distance;
 		}
 		qInfo() << "-----";
 		const Eigen::Vector3d r = (W.transpose() * W).inverse() * W.transpose() * b;
@@ -154,7 +192,7 @@ void SpecificWorker::read_data()
 		double angle = std::atan2(robot_pose.rotation()(1, 0), robot_pose.rotation()(0, 0));
 		room_draw_robot->setRotation(qRadiansToDegrees(angle));
 
-		draw_collisions(&viewer->scene);
+		draw_collisions();
 		update_windows_values();
 	}
 	catch (const Ice::Exception &e)
@@ -163,12 +201,12 @@ void SpecificWorker::read_data()
 	}
 }
 
-void SpecificWorker::draw_lidar(const auto &points, QGraphicsScene* scene)
+void SpecificWorker::draw_lidar(const auto &points)
 {
 	static std::vector<QGraphicsItem*> draw_points;
 	for (const auto &p : draw_points)
 	{
-		scene->removeItem(p);
+		viewer->scene.removeItem(p);
 		delete p;
 	}
 	draw_points.clear();
@@ -178,7 +216,7 @@ void SpecificWorker::draw_lidar(const auto &points, QGraphicsScene* scene)
 	//const QBrush brush(color, Qt::SolidPattern);
 	for (const auto &p : points)
 	{
-		const auto dp = scene->addRect(-25, -25, 50, 50, pen);
+		const auto dp = viewer->scene.addRect(-25, -25, 50, 50, pen);
 		dp->setPos(p.x, p.y);
 		draw_points.push_back(dp);   // add to the list of points to be deleted next time
 	}
@@ -187,64 +225,66 @@ void SpecificWorker::draw_lidar(const auto &points, QGraphicsScene* scene)
 	const QColor color2("cyan");
 	for(const auto &[p, _, __] : nominal_room.transform_corners_to(robot_pose.inverse()))
 	{
-		const auto i = scene->addEllipse(-100, -100, 200, 200, QPen(color2), QBrush(color2));
+		const auto i = viewer->scene.addEllipse(-100, -100, 200, 200, QPen(color2), QBrush(color2));
 		i->setPos(p.x(), p.y());
 		draw_points.push_back(i);
 	}
 }
 
-void SpecificWorker::draw_collisions(QGraphicsScene* scene)
+void SpecificWorker::draw_collisions()
 {
 	static std::vector<QGraphicsItem*> draw_points;
 	for (const auto &p : draw_points)
 	{
-		scene->removeItem(p);
+		viewer->scene.removeItem(p);
 		delete p;
 	}
 	draw_points.clear();
 
 	// FRONT LINE
 	QLineF frontLine(QPointF(-ROBOT_LENGTH/2, front_distance), QPointF(ROBOT_LENGTH/2, front_distance));
-	draw_points.push_back(scene->addLine(frontLine, QPen(QColor("Red"), 30)));
+	draw_points.push_back(viewer->scene.addLine(frontLine, QPen(QColor("Red"), 30)));
 
 	// RIGHT LINE
-	QLineF rightLine(QPointF(right_distance, width_distances), QPointF(right_distance, -width_distances));
-	draw_points.push_back(scene->addLine(rightLine, QPen(QColor("Red"), 30)));
+	QLineF rightLine(QPointF(right_distance, WIDTH_DISTANCES), QPointF(right_distance, -WIDTH_DISTANCES));
+	draw_points.push_back(viewer->scene.addLine(rightLine, QPen(QColor("Red"), 30)));
 
 	// LEFT LINE
-	QLineF leftLine(QPointF(-left_distance, width_distances), QPointF(-left_distance, -width_distances));
-	draw_points.push_back(scene->addLine(leftLine, QPen(QColor("Red"), 30))); // LEFT
+	QLineF leftLine(QPointF(-left_distance, WIDTH_DISTANCES), QPointF(-left_distance, -WIDTH_DISTANCES));
+	draw_points.push_back(viewer->scene.addLine(leftLine, QPen(QColor("Red"), 30))); // LEFT
 }
 
 
 void SpecificWorker::update_windows_values()
 {
 	this->lcdNumber_leftdist->display(left_distance);
-	this->lcdNumber_leftangle->display(left_angle);
 	this->lcdNumber_frontdist->display(front_distance);
 	this->lcdNumber_rightdist->display(right_distance);
-	this->lcdNumber_rightangle->display(right_angle);
+
+	this->lcdNumber_leftangle->display(qRadiansToDegrees(left_angle));
+	this->lcdNumber_rightangle->display(qRadiansToDegrees(right_angle));
+
 	switch (state)
 	{
-		case State::FOLLOW_WALL:
-			this->label_state->setText("Follow Wall");
-			break;
-		case State::FORWARD:
-			this->label_state->setText("Forward");
-			break;
-		case State::SPIRAL:
-			this->label_state->setText("Spiral");
-			break;
-		case State::TURN:
-			this->label_state->setText("Turn");
-			break;
-		default:
-			this->label_state->setText("Off");
-			break;
+		case State::FOLLOW_WALL: this->label_state->setText("FOLLOW WALL"); break;
+		case State::FORWARD: this->label_state->setText("FORWARD"); break;
+		case State::SPIRAL: this->label_state->setText("SPIRAL"); break;
+		case State::TURN: this->label_state->setText("TURN"); break;
+		default: this->label_state->setText("OFF"); break;
 	}
+
 	this->lcdNumber_xpos->display(robot_pose.translation().x());
 	this->lcdNumber_ypos->display(robot_pose.translation().y());
 	this->lcdNumber_angle->display(qRadiansToDegrees(std::atan2(robot_pose.rotation()(1, 0), robot_pose.rotation()(0, 0))));
+
+	this->lcdNumber_adv->display(advance);
+	this->lcdNumber_rot->display(qRadiansToDegrees(rotation));
+	switch (rotation_direction)
+	{
+		case RotationDirection::RIGHT: this->label_rotdirection->setText("RIGHT"); break;
+		case RotationDirection::NONE: this->label_rotdirection->setText("NONE"); break;
+		case RotationDirection::LEFT: this->label_rotdirection->setText("LEFT"); break;
+	}
 }
 
 void SpecificWorker::update_robot_position()
@@ -253,7 +293,6 @@ void SpecificWorker::update_robot_position()
 	{
 		RoboCompGenericBase::TBaseState bState;
 		omnirobot_proxy->getBaseState(bState);
-		//robot_polygon->setRotation(bState.alpha*180/M_PI);
 		robot_polygon->setPos(bState.x, bState.z);
 
 		std::cout << bState.alpha << " " << bState.x << " " << bState.z << std::endl;
@@ -266,7 +305,6 @@ void SpecificWorker::new_target_slot(QPointF p){}
 
 void SpecificWorker::calculateDistances(const RoboCompLidar3D::TPoints &points)
 {
-	auto robot_section = ROBOT_LENGTH/2+50;
 	float front_min = 9999, left_min = 9999, right_min = 9999;
 
 	RoboCompLidar3D::TPoint right_initPoint;	right_initPoint.x = 9999;
@@ -288,17 +326,17 @@ void SpecificWorker::calculateDistances(const RoboCompLidar3D::TPoints &points)
 		// RIGHT
 		if (point.y < ROBOT_LENGTH && point.y > -ROBOT_LENGTH && point.x >= 0)
 		{
-			if (point.y < width_distances && point.y > -width_distances)
+			if (point.y < WIDTH_DISTANCES && point.y > -WIDTH_DISTANCES)
 			{
 				if (point.x < right_min)	right_min = point.x;
 				// UPPER
-				if (point.y < width_distances && point.y > 0)
+				if (point.y < WIDTH_DISTANCES && point.y > 0)
 				{
 					if (point.x < rightUpper_point->x)	rightUpper_point = &point;
 					continue;
 				}
 				// LOWER
-				if (point.y < 0 && point.y > -width_distances)
+				if (point.y < 0 && point.y > -WIDTH_DISTANCES)
 				{
 					if (point.x < rightLower_point->x)	rightLower_point = &point;
 				}
@@ -311,17 +349,17 @@ void SpecificWorker::calculateDistances(const RoboCompLidar3D::TPoints &points)
 		if (point.y < ROBOT_LENGTH && point.y > -ROBOT_LENGTH && point.x <= 0)
 		{
 			// MIDDLE
-			if (point.y < width_distances && point.y > -width_distances)
+			if (point.y < WIDTH_DISTANCES && point.y > -WIDTH_DISTANCES)
 			{
 				if (-point.x < left_min)	left_min = -point.x;
 				// UPPER
-				if (point.y < width_distances && point.y > 0)
+				if (point.y < WIDTH_DISTANCES && point.y > 0)
 				{
 					if (point.x > leftUpper_point->x)	leftUpper_point = &point;
 					continue;
 				}
 				// LOWER
-				if (point.y < 0 && point.y > -width_distances)
+				if (point.y < 0 && point.y > -WIDTH_DISTANCES)
 				{
 					if (point.x > leftLower_point->x)	leftLower_point = &point;
 				}
@@ -344,64 +382,82 @@ void SpecificWorker::calculateDistances(const RoboCompLidar3D::TPoints &points)
 		left_angle = atan2(leftUpper_point->y - leftLower_point->y, leftUpper_point->x - leftLower_point->x) - M_PI_2;
 }
 
+void SpecificWorker::set_robot_speed(float advx, float advy, float rot)
+{
+	advance = std::hypot(advx, advy);
+	rotation = rot;
+
+	switch (rotation_direction) {
+		case RotationDirection::RIGHT: omnirobot_proxy->setSpeedBase(advx, advy, rotation); break;
+		case RotationDirection::NONE: omnirobot_proxy->setSpeedBase(advx, advy, 0); break;
+		case RotationDirection::LEFT: omnirobot_proxy->setSpeedBase(advx, advy, -rotation); break;
+	}
+}
+
+RotationDirection SpecificWorker::evaluate_rotation_direction(float rot)
+{
+	if (rot > 0) return RotationDirection::RIGHT;
+	if (rot < 0) return RotationDirection::LEFT;
+	return RotationDirection::NONE;
+}
+
 void SpecificWorker::doStateMachine()
 {
 	switch (state)
 	{
 		case State::SPIRAL:
-			spiralState();
+			spiral_state();
 			break;
 		case State::FORWARD:
-			forwardState();
+			forward_state();
 			break;
 		case State::TURN:
-			turnState();
+			turn_state();
 			break;
 		case State::FOLLOW_WALL:
-			follow_WallState();
+			followWall_state();
 			break;
 		case State::OFF:
 			break;
 	}
 }
-void SpecificWorker::forwardState()
+void SpecificWorker::forward_state()
 {
 	if (front_distance < OBSTACLE_DIST)
 	{
 		state = State::TURN;
-		omnirobot_proxy->setSpeedBase(0,0,0);
+		set_robot_speed(0,0,0);
 		qInfo() << "Obstaculo encontrado, girando...";
 		return;
 	}
-	omnirobot_proxy->setSpeedBase(0,MAX_ADV,0);
+
+	rotation_direction = RotationDirection::NONE;
+	set_robot_speed(0,MAX_ADV,0);
 }
 
-void SpecificWorker::turnState()
+void SpecificWorker::turn_state()
 {
-	if (front_distance > OBSTACLE_DIST)
+	if (front_distance > OBSTACLE_DIST*1.5)
 	{
-		right_turn = right_distance > left_distance;
-		current_rotation = INIT_ROTATION;
-		current_velocity = INIT_VELOCITY;
+		set_robot_speed(0,0,0);
 		state = stateRandomizer();
 		return;
 	}
 
-	if (right_distance > left_distance)
+	if (rotation_direction == RotationDirection::NONE)
 	{
-		omnirobot_proxy->setSpeedBase(0,0,MAX_ROT);
+		rotation_direction = (right_distance > left_distance) ? RotationDirection::RIGHT : RotationDirection::LEFT;
+		return;
 	}
-	else
-	{
-		omnirobot_proxy->setSpeedBase(0,0,-MAX_ROT);
-	}
+
+	set_robot_speed(0,0,MAX_ROT);
 }
 
-void SpecificWorker::follow_WallState()
+void SpecificWorker::followWall_state()
 {
 	if (front_distance < OBSTACLE_DIST)
 	{
-		omnirobot_proxy->setSpeedBaseAsync(0, 0, 0);
+		set_robot_speed(0, 0, 0);
 		state = State::TURN;
 		return;
 	}
@@ -421,25 +477,31 @@ void SpecificWorker::follow_WallState()
 	if (rotation < -MAX_ROT) rotation = -MAX_ROT;
 	if (rotation > -0.01f && rotation < 0.1f) rotation = 0;
 
-	omnirobot_proxy->setSpeedBaseAsync(0, MAX_ADV, rotation);
+	rotation_direction = evaluate_rotation_direction(rotation);
+	set_robot_speed(0, MAX_ADV, std::abs(rotation));
 }
 
-void SpecificWorker::spiralState()
+void SpecificWorker::spiral_state()
 {
-	if(front_distance < OBSTACLE_DIST || current_rotation >= 1.0f  || current_rotation <= -1.0f || current_velocity < 350)
+	if((front_distance < OBSTACLE_DIST || rotation >= MAX_ROT  || rotation <= -MAX_ROT || advance < 350) && (rotation_direction != RotationDirection::NONE))
 	{
-		omnirobot_proxy->setSpeedBase(0,0,0);
+		set_robot_speed(0,0,0);
 		state = State::TURN;
 		return;
 	}
 
-	current_rotation += (MAX_ROT - current_rotation) * 0.05;
-	current_velocity *= 0.99;
+	rotation += (MAX_ROT - rotation) * 0.065;
+	advance *= 0.996;
 
-	if (right_turn)
-		omnirobot_proxy->setSpeedBase(0,current_velocity,current_rotation);
-	else
-		omnirobot_proxy->setSpeedBase(0,current_velocity,-current_rotation);
+	if (rotation_direction == RotationDirection::NONE)
+	{
+		rotation_direction = (right_distance > left_distance) ? RotationDirection::RIGHT : RotationDirection::LEFT;
+		rotation = 0;
+		advance = MAX_ADV;
+		return;
+	}
+
+	set_robot_speed(0,advance,rotation);
 }
 
 State SpecificWorker::stateRandomizer()
@@ -453,62 +515,6 @@ State SpecificWorker::stateRandomizer()
 		return State::FOLLOW_WALL;
 	}
 	return State::TURN;
-}
-
-
-std::optional<RoboCompLidar3D::TPoints> SpecificWorker::filter_min_distance_cppintertools(const RoboCompLidar3D::TPoints &points)
-{
-	RoboCompLidar3D::TPoints result; result.reserve(points.size());
-
-	for (auto&& [angle, group] : iter::groupby(points, [](const auto& p)
-	{
-		float multiplier = std::pow(10.0f, 2); return std::floor(p.phi * multiplier) / multiplier;
-	}))
-	{
-		auto min_it = std::min_element(std::begin(group), std::end(group),
-			[](const auto& a, const auto& b){ return a.r < b.r; });
-		result.emplace_back(RoboCompLidar3D::TPoint{.x=min_it->x, .y=min_it->y, .phi=min_it->phi});
-	}
-	return result;
-}
-
-
-RoboCompLidar3D::TPoints SpecificWorker::filter_isolated_points(const RoboCompLidar3D::TPoints &points, float d) // set to 200mm
-{
-    if (points.empty()) return {};
-
-    const float d_squared = d * d;  // Avoid sqrt by comparing squared distances
-    std::vector<bool> hasNeighbor(points.size(), false);
-
-    // Create index vector for parallel iteration
-    std::vector<size_t> indices(points.size());
-    std::iota(indices.begin(), indices.end(), size_t{0});
-
-    // Parallelize outer loop - each thread checks one point
-    std::for_each(std::execution::par, indices.begin(), indices.end(), [&](size_t i)
-        {
-            const auto& p1 = points[i];
-            // Sequential inner loop (avoid nested parallelism)
-            for (auto &&[j,p2] : iter::enumerate(points))
-                {
-                    if (i == j) continue;
-                    const float dx = p1.x - p2.x;
-                    const float dy = p1.y - p2.y;
-                    if (dx * dx + dy * dy <= d_squared)
-                    {
-                        hasNeighbor[i] = true;
-                        break;
-                    }
-                }
-        });
-
-    // Collect results
-    std::vector<RoboCompLidar3D::TPoint> result;
-    result.reserve(points.size());
-    for (auto &&[i, p] : iter::enumerate(points))
-        if (hasNeighbor[i])
-             result.push_back(points[i]);
-    return result;
 }
 
 
@@ -547,11 +553,14 @@ void SpecificWorker::doStartStop()
 	if (state == State::OFF)
 	{
 		state = stateRandomizer();
+		rotation_direction = RotationDirection::NONE;
 		this->pushButton_startstop->setText("Stop");
 		return;
 	}
 
 	state = State::OFF;
+	rotation_direction = RotationDirection::NONE;
+	set_robot_speed(0,0,0);
 	this->pushButton_startstop->setText("Start");
 }
 
