@@ -154,12 +154,12 @@ void SpecificWorker::read_data()
 		if (filter_values.empty())	return;
 
 		calculateDistances(filter_values);
-		
+
 		draw_lidar(filter_values);
 
 		auto measurements_corners = room_detector.compute_corners(filter_values, &viewer->scene);
 		auto nominal_corners_on_robot_frame = nominal_room.transform_corners_to(robot_pose.inverse());
-		auto hungarian_match =  hungarian.match(measurements_corners, nominal_corners_on_robot_frame);
+		auto hungarian_match =  hungarian.match(measurements_corners, nominal_corners_on_robot_frame, 1500);
 
 		Eigen::MatrixXd W(nominal_room.corners.size() * 2, 3);
 		Eigen:: VectorXd b(nominal_room.corners.size() * 2);
@@ -187,10 +187,6 @@ void SpecificWorker::read_data()
 
 		robot_pose.translate(Eigen::Vector2d(r(0), r(1)));
 		robot_pose.rotate(r[2]);
-
-		room_draw_robot->setPos(robot_pose.translation().x(), robot_pose.translation().y());
-		double angle = std::atan2(robot_pose.rotation()(1, 0), robot_pose.rotation()(0, 0));
-		room_draw_robot->setRotation(qRadiansToDegrees(angle));
 
 		draw_collisions();
 		update_windows_values();
@@ -291,11 +287,9 @@ void SpecificWorker::update_robot_position()
 {
 	try
 	{
-		RoboCompGenericBase::TBaseState bState;
-		omnirobot_proxy->getBaseState(bState);
-		robot_polygon->setPos(bState.x, bState.z);
-
-		std::cout << bState.alpha << " " << bState.x << " " << bState.z << std::endl;
+		room_draw_robot->setPos(robot_pose.translation().x(), robot_pose.translation().y());
+		double angle = std::atan2(robot_pose.rotation()(1, 0), robot_pose.rotation()(0, 0));
+		room_draw_robot->setRotation(qRadiansToDegrees(angle));
 	}
 	catch (const Ice::Exception &e){std::cout << e.what() << std::endl;}
 }
@@ -317,7 +311,7 @@ void SpecificWorker::calculateDistances(const RoboCompLidar3D::TPoints &points)
 	for (const auto &point: points)
 	{
 		//FRONT
-		if (point.x < robot_section && point.x > -robot_section && point.y >= 0)
+		if (point.x < ROBOT_SECTION && point.x > -ROBOT_SECTION && point.y >= 0)
 		{
 			if (point.y < front_min)	front_min = point.y;
 			continue;
@@ -386,6 +380,8 @@ void SpecificWorker::set_robot_speed(float advx, float advy, float rot)
 {
 	advance = std::hypot(advx, advy);
 	rotation = rot;
+
+	if (rot == 0) rotation_direction = RotationDirection::NONE;
 
 	switch (rotation_direction) {
 		case RotationDirection::RIGHT: omnirobot_proxy->setSpeedBase(advx, advy, rotation); break;
@@ -483,23 +479,22 @@ void SpecificWorker::followWall_state()
 
 void SpecificWorker::spiral_state()
 {
-	if((front_distance < OBSTACLE_DIST || rotation >= MAX_ROT  || rotation <= -MAX_ROT || advance < 350) && (rotation_direction != RotationDirection::NONE))
+	if((front_distance < OBSTACLE_DIST || rotation > MAX_ROT || advance < MAX_ADV/4.5) && (rotation_direction != RotationDirection::NONE))
 	{
 		set_robot_speed(0,0,0);
 		state = State::TURN;
 		return;
 	}
 
-	rotation += (MAX_ROT - rotation) * 0.065;
-	advance *= 0.996;
-
 	if (rotation_direction == RotationDirection::NONE)
 	{
 		rotation_direction = (right_distance > left_distance) ? RotationDirection::RIGHT : RotationDirection::LEFT;
-		rotation = 0;
+		rotation = MAX_ROT;
 		advance = MAX_ADV;
 		return;
 	}
+
+	advance -= MAX_ADV / advance;
 
 	set_robot_speed(0,advance,rotation);
 }

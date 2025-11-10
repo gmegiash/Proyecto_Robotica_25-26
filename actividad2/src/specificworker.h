@@ -49,12 +49,11 @@
 
 //	Constantes de distancias
 #define ROBOT_LENGTH 400
-#define robot_section (ROBOT_LENGTH/2 + 75)
+#define ROBOT_SECTION (ROBOT_LENGTH/2 + 75)
 #define WIDTH_DISTANCES 40
 #define MAX_ADV 800.0f      // velocidad avance
 #define MAX_ROT 0.6125f        // velocidad rotación
-#define OBSTACLE_DIST 750.0f  // mm
-#define WALL_DIST 700.0f      // mm
+#define OBSTACLE_DIST 1000.0f  // mm
 
 struct NominalRoom
 {
