@@ -3,7 +3,7 @@ PROJECT( localiser )
 
 IF ( "$ENV{ROBOCOMP}" STREQUAL "")
   MESSAGE(WARNING "ROBOCOMP variable not set. Using the default value: /home/robocomp/robocomp")
-  SET (ENV{ROBOCOMP} "/home/ismael/robocomp/")
+  SET (ENV{ROBOCOMP} "/home/robocomp/robocomp/")
 ENDIF ( "$ENV{ROBOCOMP}" STREQUAL "")
 
 SET(RC_COMPONENT_PATH ${CMAKE_CURRENT_SOURCE_DIR} CACHE STRING "component base path" FORCE)
