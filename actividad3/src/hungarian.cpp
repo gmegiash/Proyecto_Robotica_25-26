@@ -12,7 +12,7 @@ namespace rc
         std::vector<double> costs;
         for (const auto &[c, _, __]: measurement_corners)    // rows
             for (const auto &[rc, _, __]: nominal_corners)   // cols
-                costs.emplace_back(euclidean_distance(c, rc) / (hypot(c.x(),c.y()) / 1000 ));
+                costs.emplace_back(euclidean_distance(c, rc));
         const auto rows = measurement_corners.size();
         const auto cols = nominal_corners.size();
 
@@ -21,17 +21,9 @@ namespace rc
             return {};
 
         // print costs for debugging
-        for (int i = 0; i < rows; i++)
-        {
-            const auto &[c, _, __] = measurement_corners[i];
-            std::cout << "[" << c.x() << "," << c.y() << "]: ";
-            for (int j = 0; j < cols; j++)
-            {
-                std::cout << costs[i*rows + j] << ", ";
-            }
-            std::cout << std::endl;
-        }
-        std::cout << "---------------------------------" << std::endl;
+        // for (auto c : costs)
+        //     std::cout << c << std::endl;
+        // std::cout << "-------------------" << std::endl;
 
         // lambda to access the costs matrix
         Match match;   //  measurement - nominal

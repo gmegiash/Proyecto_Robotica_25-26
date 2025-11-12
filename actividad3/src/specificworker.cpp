@@ -74,21 +74,44 @@ void SpecificWorker::initialize()
 {
     std::cout << "initialize worker" << std::endl;
 
-	this->setupUi(this);
-	this->dimensions = QRectF(-6000, -3000, 12000, 6000);
-	viewer = new AbstractGraphicViewer(this->frame, this->dimensions);
-	viewer_room = new AbstractGraphicViewer(this->frame_room, nominal_room.rect);
-	this->resize(900,450);
-	this->show();
-	const auto rob = viewer->add_robot(ROBOT_LENGTH, ROBOT_LENGTH, 0, 190, QColor("Blue"));
-	robot_polygon = std::get<0>(rob);
-	const auto rob_room= viewer_room->add_robot(ROBOT_LENGTH, ROBOT_LENGTH, 0, 190, QColor("Blue"));
-	room_draw_robot = std::get<0>(rob_room);
-	viewer_room->scene.addRect(nominal_room.rect, QPen(Qt::black, 30));
-	viewer_room->fitInView(nominal_room.rect, Qt::KeepAspectRatio);
+	if (this->startup_check_flag)
+	{
+		this->startup_check();
+	} else
+	{
 
-	robot_pose.setIdentity();
-	robot_pose.translate(Eigen::Vector2d(0.0,0.0));
+		this->setupUi(this);
+		this->dimensions = QRectF(-6000, -3000, 12000, 6000);
+		viewer = new AbstractGraphicViewer(this->frame, this->dimensions);
+		viewer_room = new AbstractGraphicViewer(this->frame_room, nominal_room.rect);
+		this->resize(900,450);
+		this->show();
+		const auto rob = viewer->add_robot(Params_ROBOT_LENGTH, Params_ROBOT_LENGTH, 0, 190, QColor("Blue"));
+		robot_polygon = std::get<0>(rob);
+		const auto rob_room= viewer_room->add_robot(Params_ROBOT_LENGTH, Params_ROBOT_LENGTH, 0, 190, QColor("Blue"));
+		room_draw_robot = std::get<0>(rob_room);
+		viewer_room->scene.addRect(nominal_room.rect, QPen(Qt::black, 30));
+		viewer_room->fitInView(nominal_room.rect, Qt::KeepAspectRatio);
+
+		// initialise robot pose
+		robot_pose.setIdentity();
+		robot_pose.translate(Eigen::Vector2d(0.0,0.0));
+
+		// time series plotter for match error
+		TimeSeriesPlotter::Config plotConfig;
+		plotConfig.title = "Maximun Match Error Over Time";
+		plotConfig.yAxisLabel = "Error (mm)";
+		plotConfig.timeWindowSeconds = 15.0; // Show a 15-second window
+		plotConfig.autoScaleY = false;       // We will set a fixed range
+		plotConfig.yMin = 0;
+		plotConfig.yMax = 1000;
+		//time_series_plotter = std::make_unique<TimeSeriesPlotter>(frame_plot_error, plotConfig);
+		match_error_graph = time_series_plotter->addGraph("", Qt::blue);
+
+		// stop robot
+		move_robot(0, 0, 0);
+
+	}
 
 	connect(pushButton_startstop, SIGNAL(clicked()), this, SLOT(doStartStop()));
 	connect(viewer, &AbstractGraphicViewer::new_mouse_coordinates, this, &SpecificWorker::new_target_slot);
@@ -159,7 +182,7 @@ void SpecificWorker::read_data()
 
 		auto measurements_corners = room_detector.compute_corners(filter_values, &viewer->scene);
 		auto nominal_corners_on_robot_frame = nominal_room.transform_corners_to(robot_pose.inverse());
-		auto hungarian_match =  hungarian.match(measurements_corners, nominal_corners_on_robot_frame, 1500);
+		auto hungarian_match =  hungarian.match(get<0>(measurements_corners), nominal_corners_on_robot_frame, 1500);
 
 		Eigen::MatrixXd W(nominal_room.corners.size() * 2, 3);
 		Eigen:: VectorXd b(nominal_room.corners.size() * 2);
@@ -238,7 +261,7 @@ void SpecificWorker::draw_collisions()
 	draw_points.clear();
 
 	// FRONT LINE
-	QLineF frontLine(QPointF(-ROBOT_LENGTH/2, front_distance), QPointF(ROBOT_LENGTH/2, front_distance));
+	QLineF frontLine(QPointF(-Params_ROBOT_LENGTH/2, front_distance), QPointF(Params_ROBOT_LENGTH/2, front_distance));
 	draw_points.push_back(viewer->scene.addLine(frontLine, QPen(QColor("Red"), 30)));
 
 	// RIGHT LINE
@@ -318,7 +341,7 @@ void SpecificWorker::calculateDistances(const RoboCompLidar3D::TPoints &points)
 		}
 
 		// RIGHT
-		if (point.y < ROBOT_LENGTH && point.y > -ROBOT_LENGTH && point.x >= 0)
+		if (point.y < Params_ROBOT_LENGTH && point.y > -Params_ROBOT_LENGTH && point.x >= 0)
 		{
 			if (point.y < WIDTH_DISTANCES && point.y > -WIDTH_DISTANCES)
 			{
@@ -340,7 +363,7 @@ void SpecificWorker::calculateDistances(const RoboCompLidar3D::TPoints &points)
 		}
 
 		// LEFT
-		if (point.y < ROBOT_LENGTH && point.y > -ROBOT_LENGTH && point.x <= 0)
+		if (point.y < Params_ROBOT_LENGTH && point.y > -Params_ROBOT_LENGTH && point.x <= 0)
 		{
 			// MIDDLE
 			if (point.y < WIDTH_DISTANCES && point.y > -WIDTH_DISTANCES)
@@ -417,6 +440,22 @@ void SpecificWorker::doStateMachine()
 			break;
 	}
 }
+
+void SpecificWorker::doState2Machine()
+{
+	switch(state2) {
+	case STATE::IDLE:               return "IDLE";
+	case STATE::LOCALISE:           return "LOCALISE";
+	case STATE::GOTO_DOOR:          return "GOTO_DOOR";
+	case STATE::TURN:               return "TURN";
+	case STATE::ORIENT_TO_DOOR:     return "ORIENT_TO_DOOR";
+	case STATE::GOTO_ROOM_CENTER:   return "GOTO_ROOM_CENTER";
+	case STATE::CROSS_DOOR:         return "CROSS_DOOR";
+	case STATE::OFF:				return "OFF";
+	default:                        return "UNKNOWN";
+	}
+}
+
 void SpecificWorker::forward_state()
 {
 	if (front_distance < OBSTACLE_DIST)

@@ -13,6 +13,8 @@ LIST(APPEND HEADERS
 
 LIST(APPEND LIBS ${LIBS} tbb)
 
+SET (LIBS ${LIBS} tbb Qt6PrintSupport)
+
 INCLUDE($ENV{ROBOCOMP}/cmake/modules/opencv4.cmake)
 
 # no-char8_t to avoid a problem with ICE Connection lib.
