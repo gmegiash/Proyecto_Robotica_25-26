@@ -44,6 +44,7 @@
 #include "ransac_line_detector.h"
 #include "room_detector.h"
 #include "time_series_plotter.h"
+#include "nominal_room.h"
 #include "door_detector.h"
 #include "image_processor.h"
 #include <expected>
@@ -52,36 +53,6 @@
  * \brief Class SpecificWorker implements the core functionality of the component.
  */
 
-//	Constantes de distancias
-#define Params_ROBOT_LENGTH 400
-#define ROBOT_SECTION (ROBOT_LENGTH/2 + 75)
-#define WIDTH_DISTANCES 40
-#define MAX_ADV 800.0f      // velocidad avance
-#define MAX_ROT 0.6125f        // velocidad rotación
-#define OBSTACLE_DIST 1000.0f  // mm
-
-struct NominalRoom
-{
-	float width; //  mm
-	float length;
-	Corners corners;
-	QRectF rect{-5000, -2500, 10000,5000};
-	explicit NominalRoom(const float width_=10000.f, const float length_=5000.f, Corners  corners_ = {}) : width(width_), length(length_), corners(std::move(corners_)){};
-	Corners transform_corners_to(const Eigen::Affine2d &transform) const  // for room to robot pass the inverse of robot_pose
-	{
-		Corners transformed_corners;
-		for(const auto &[p, _, __] : corners)
-		{
-			auto ep = Eigen::Vector2d{p.x(), p.y()};
-			Eigen::Vector2d tp = transform * ep;
-			transformed_corners.emplace_back(QPointF{static_cast<float>(tp.x()), static_cast<float>(tp.y())}, 0.f, 0.f);
-		}
-		return transformed_corners;
-	}
-};
-
-enum class State { FORWARD, TURN, FOLLOW_WALL, SPIRAL, OFF };
-enum class STATE {TURN, IDLE, LOCALISE, GOTO_DOOR, ORIENT_TO_DOOR, GOTO_ROOM_CENTER, CROSS_DOOR, OFF};
 enum class RotationDirection { RIGHT, NONE, LEFT };
 class SpecificWorker : public GenericWorker
 {
@@ -139,6 +110,8 @@ private:
 	{
 		float ROBOT_WIDTH = 460;  // mm
 		float ROBOT_LENGTH = 480;  // mm
+		float ROBOT_SECTION = ROBOT_LENGTH/2 + 75;
+		float WIDTH_DISTANCES = 40;
 		float MAX_ADV_SPEED = 1000; // mm/s
 		float MAX_ROT_SPEED = 1; // rad/s
 		float MAX_SIDE_SPEED = 50; // mm/s
@@ -171,81 +144,55 @@ private:
 	};
 	Params params;
 
-	// Data
-	NominalRoom nominal_room{
-		10000.f, 5000.f,
-		{
-					{QPointF{-5000.f, -2500.f}, 0.f, 0.f},
-					{QPointF{5000.f, -2500.f}, 0.f, 0.f},
-					{QPointF{5000.f, 2500.f}, 0.f, 0.f},
-					{QPointF{-5000.f, 2500.f}, 0.f, 0.f}
-		}
-	};
+	// viewer
+	AbstractGraphicViewer *viewer, *viewer_room;
+	QGraphicsPolygonItem *robot_draw, *robot_room_draw;
+
+	// robot
 	Eigen::Affine2d robot_pose;
+
+	// rooms
+	std::vector<NominalRoom> nominal_rooms{ NominalRoom{5500.f, 4000.f}, NominalRoom{8000.f, 4000.f}};
 	rc::Room_Detector room_detector;
 	rc::Hungarian hungarian;
 
-	RoboCompLidar3D::TPoints filter_isolated_points(const RoboCompLidar3D::TPoints &points, float d);
-	void read_data();
-
-	// graphics
-	QRectF dimensions;
-		// robot perspective
-		AbstractGraphicViewer *viewer;
-		QGraphicsPolygonItem *robot_polygon;
-		// nominal perspective
-		AbstractGraphicViewer *viewer_room;
-		QGraphicsPolygonItem *room_draw_robot;
-
-
-	void draw_lidar(const auto &points);
-	void draw_collisions();
-	void update_windows_values();
-	void update_robot_position();
-
-	// Distances
-	float front_distance;
-	float right_distance;
-	float left_distance;
-
-	double right_angle;
-	double left_angle;
-
-	void calculateDistances(const RoboCompLidar3D::TPoints &points);
-
-	// Movements
-	State state = State::OFF;
-	STATE state2 = STATE::LOCALISE;
+	// state machine
+	enum class STATE {GOTO_DOOR, ORIENT_TO_DOOR, LOCALISE, GOTO_ROOM_CENTER, TURN, IDLE, CROSS_DOOR};
+	inline const char* to_string(const STATE s) const
+	{
+		switch(s) {
+			case STATE::IDLE:               return "IDLE";
+			case STATE::LOCALISE:           return "LOCALISE";
+			case STATE::GOTO_DOOR:          return "GOTO_DOOR";
+			case STATE::TURN:               return "TURN";
+			case STATE::ORIENT_TO_DOOR:     return "ORIENT_TO_DOOR";
+			case STATE::GOTO_ROOM_CENTER:   return "GOTO_ROOM_CENTER";
+			case STATE::CROSS_DOOR:         return "CROSS_DOOR";
+			default:                        return "UNKNOWN";
+		}
+	}
+	STATE state = STATE::LOCALISE;
 	using RetVal = std::tuple<STATE, float, float>;
 
-	double rotation = 0;
-	double advance = 0;
-	RotationDirection rotation_direction = RotationDirection::NONE;
+	RetVal localise(const Match &match);
+	RetVal goto_door(const RoboCompLidar3D::TPoints &points);
+	RetVal turn(const Corners &corners);
+	RetVal orient_to_door(const RoboCompLidar3D::TPoints &points);
+	RetVal goto_room_center(const RoboCompLidar3D::TPoints &points);
+	RetVal cross_door(const RoboCompLidar3D::TPoints &points);
+	RetVal update_pose(const Corners &corners, const Match &match);
+	RetVal process_state(const RoboCompLidar3D::TPoints &data, const Corners &corners, const Match &match, AbstractGraphicViewer *viewer);
 
-	void set_robot_speed(float advx, float advy, float rot);
-	RotationDirection evaluate_rotation_direction(float rot);
+	// draw
+	void draw_lidar(const auto &points, std::optional<Eigen::Vector2d> center_opt);
+	void update_robot_position();
 
-	void doStateMachine();
-	void doState2Machine();
-
-	void forward_state();
-	void turn_state();
-	void followWall_state();
-	void spiral_state();
-
-	//aux
+	// aux
+	RoboCompLidar3D::TPoints read_data();
 	std::expected<int, std::string> closest_lidar_index_to_given_angle(const auto &points, float angle);
 	RoboCompLidar3D::TPoints filter_same_phi(const RoboCompLidar3D::TPoints &points);
+	RoboCompLidar3D::TPoints filter_isolated_points(const RoboCompLidar3D::TPoints &points, float d);
 	void print_match(const Match &match, const float error =1.f) const;
-
-	RetVal goto_door(const RoboCompLidar3D::TPoints &points);
-	RetVal orient_to_door(const RoboCompLidar3D::TPoints &points);
-	RetVal cross_door(const RoboCompLidar3D::TPoints &points);
-	RetVal localise(const Match &match);
-	RetVal goto_room_center(const RoboCompLidar3D::TPoints &points);
-	RetVal update_pose(const Corners &corners, const Match &match);
-	RetVal turn(const Corners &corners);
-	RetVal process_state(const RoboCompLidar3D::TPoints &data, const Corners &corners, const Match &match, AbstractGraphicViewer *viewer);
 
 	// DoubleBuffer for velocity commands
 	DoubleBuffer<std::tuple<float, float, float, long>, std::tuple<float, float, float, long>> commands_buffer;
@@ -273,8 +220,6 @@ private:
 	Eigen::Vector3d solve_pose(const Corners &corners, const Match &match);
 	void predict_robot_pose();
 	std::tuple<float, float> robot_controller(const Eigen::Vector2f &target);
-
-	State stateRandomizer();
 
 	/**
      * \brief Flag indicating whether startup checks are enabled.

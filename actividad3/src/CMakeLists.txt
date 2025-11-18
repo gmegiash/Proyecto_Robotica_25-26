@@ -4,6 +4,9 @@ LIST(APPEND SOURCES
     ../src/hungarian.cpp
     ../src/ransac_line_detector.cpp
     ../src/room_detector.cpp
+    ../src/door_detector.cpp
+    ../src/qcustomplot.cpp
+    ../src/time_series_plotter.cpp
 )
 
 # Headers set

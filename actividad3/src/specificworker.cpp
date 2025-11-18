@@ -22,8 +22,6 @@
 #include <ranges>
 #include <cppitertools/groupby.hpp>
 
-
-
 SpecificWorker::SpecificWorker(const ConfigLoader& configLoader, TuplePrx tprx, bool startup_check) : GenericWorker(configLoader, tprx)
 {
 	this->startup_check_flag = startup_check;
@@ -81,35 +79,6 @@ void SpecificWorker::initialize()
 	{
 
 		this->setupUi(this);
-		this->dimensions = QRectF(-6000, -3000, 12000, 6000);
-		viewer = new AbstractGraphicViewer(this->frame, this->dimensions);
-		viewer_room = new AbstractGraphicViewer(this->frame_room, nominal_room.rect);
-		this->resize(900,450);
-		this->show();
-		const auto rob = viewer->add_robot(Params_ROBOT_LENGTH, Params_ROBOT_LENGTH, 0, 190, QColor("Blue"));
-		robot_polygon = std::get<0>(rob);
-		const auto rob_room= viewer_room->add_robot(Params_ROBOT_LENGTH, Params_ROBOT_LENGTH, 0, 190, QColor("Blue"));
-		room_draw_robot = std::get<0>(rob_room);
-		viewer_room->scene.addRect(nominal_room.rect, QPen(Qt::black, 30));
-		viewer_room->fitInView(nominal_room.rect, Qt::KeepAspectRatio);
-
-		// initialise robot pose
-		robot_pose.setIdentity();
-		robot_pose.translate(Eigen::Vector2d(0.0,0.0));
-
-		// time series plotter for match error
-		TimeSeriesPlotter::Config plotConfig;
-		plotConfig.title = "Maximun Match Error Over Time";
-		plotConfig.yAxisLabel = "Error (mm)";
-		plotConfig.timeWindowSeconds = 15.0; // Show a 15-second window
-		plotConfig.autoScaleY = false;       // We will set a fixed range
-		plotConfig.yMin = 0;
-		plotConfig.yMax = 1000;
-		//time_series_plotter = std::make_unique<TimeSeriesPlotter>(frame_plot_error, plotConfig);
-		match_error_graph = time_series_plotter->addGraph("", Qt::blue);
-
-		// stop robot
-		move_robot(0, 0, 0);
 
 	}
 
@@ -121,12 +90,59 @@ void SpecificWorker::initialize()
 
 void SpecificWorker::compute()
 {
-	read_data();
+	auto data = read_data();
 
-	doStateMachine();
+	// compute corners
+	const auto &[corners, lines] = room_detector.compute_corners(data, &viewer->scene);
+	const auto center_opt = room_detector.estimate_center_from_walls(lines);
+	draw_lidar(data, center_opt);
+	// match corners  transforming first nominal corners to robot's frame
+	const auto match = hungarian.match(corners,
+											  nominal_rooms[0].transform_corners_to(robot_pose.inverse()));
 
-	update_robot_position();
+
+	// compute max of  match error
+	float max_match_error = 99999.f;
+	if (not match.empty())
+	{
+		const auto max_error_iter = std::ranges::max_element(match, [](const auto &a, const auto &b)
+			{ return std::get<2>(a) < std::get<2>(b); });
+		max_match_error = static_cast<float>(std::get<2>(*max_error_iter));
+		time_series_plotter->addDataPoint(match_error_graph,max_match_error);
+		//print_match(match, max_match_error); //debugging
+	}
+
+
+	// update robot pose
+	if (localised)
+		update_robot_pose(corners, match);
+
+
+	// Process state machine
+	RetVal ret_val = process_state(data, corners, match, viewer);
+	auto [st, adv, rot] = ret_val;
+	state = st;
+
+
+	// Send movements commands to the robot constrained by the match_error
+	//qInfo() << __FUNCTION__ << "Adv: " << adv << " Rot: " << rot;
+	move_robot(adv, rot, max_match_error);
+
+
+	// draw robot in viewer
+	robot_room_draw->setPos(robot_pose.translation().x(), robot_pose.translation().y());
+	const double angle = qRadiansToDegrees(std::atan2(robot_pose.rotation()(1, 0), robot_pose.rotation()(0, 0)));
+	robot_room_draw->setRotation(angle);
 }
+
+RoboCompLidar3D::TPoints SpecificWorker::read_data()
+{
+	auto data = lidar3d_proxy->getLidarDataWithThreshold2d("helios", 12000, 1);
+
+	return door_detector.filter_points(data.points, &viewer->scene);
+}
+
+
 
 RoboCompLidar3D::TPoints SpecificWorker::filter_isolated_points(const RoboCompLidar3D::TPoints &points, float d) // set to 200mm
 {
@@ -166,61 +182,7 @@ RoboCompLidar3D::TPoints SpecificWorker::filter_isolated_points(const RoboCompLi
 	return result;
 }
 
-void SpecificWorker::read_data()
-{
-	try
-	{
-		auto data = lidar3d_proxy->getLidarDataWithThreshold2d("helios", 12000, 1);
-		if (data.points.empty()) return;
-
-		const auto filter_values = filter_isolated_points(data.points, 200);
-		if (filter_values.empty())	return;
-
-		calculateDistances(filter_values);
-
-		draw_lidar(filter_values);
-
-		auto measurements_corners = room_detector.compute_corners(filter_values, &viewer->scene);
-		auto nominal_corners_on_robot_frame = nominal_room.transform_corners_to(robot_pose.inverse());
-		auto hungarian_match =  hungarian.match(get<0>(measurements_corners), nominal_corners_on_robot_frame, 1500);
-
-		Eigen::MatrixXd W(nominal_room.corners.size() * 2, 3);
-		Eigen:: VectorXd b(nominal_room.corners.size() * 2);
-
-		for (auto &&[i, m]: hungarian_match | iter::enumerate)
-		{
-			auto &[meas_c, nom_c, distance] = m;
-			auto &[p_meas, __, ___] = meas_c;
-			auto &[p_nom, ____, _____] = nom_c;
-			b(2 * i) = p_nom.x() - p_meas.x();
-			b(2 * i + 1) = p_nom.y() - p_meas.y();
-			W.block<1, 3>(2 * i, 0) << 1.0, 0.0, -p_meas.y();
-			W.block<1, 3>(2 * i +1, 0) << 0.0, 1.0, p_meas.x();
-
-			// qInfo() << p_meas << p_nom << distance;
-		}
-		qInfo() << "-----";
-		const Eigen::Vector3d r = (W.transpose() * W).inverse() * W.transpose() * b;
-		W.transpose() * b;
-		// std::cout << r << std::endl;
-		// qInfo() << "--------------------";
-
-		if (r.array().isNaN().any())
-			return;
-
-		robot_pose.translate(Eigen::Vector2d(r(0), r(1)));
-		robot_pose.rotate(r[2]);
-
-		draw_collisions();
-		update_windows_values();
-	}
-	catch (const Ice::Exception &e)
-	{
-		std::cout << e << " " << "Conexion con laser" << std::endl;
-	}
-}
-
-void SpecificWorker::draw_lidar(const auto &points)
+void SpecificWorker::draw_lidar(const auto &points,  std::optional<Eigen::Vector2d> center_opt)
 {
 	static std::vector<QGraphicsItem*> draw_points;
 	for (const auto &p : draw_points)
@@ -240,79 +202,19 @@ void SpecificWorker::draw_lidar(const auto &points)
 		draw_points.push_back(dp);   // add to the list of points to be deleted next time
 	}
 
-
-	const QColor color2("cyan");
-	for(const auto &[p, _, __] : nominal_room.transform_corners_to(robot_pose.inverse()))
-	{
-		const auto i = viewer->scene.addEllipse(-100, -100, 200, 200, QPen(color2), QBrush(color2));
-		i->setPos(p.x(), p.y());
-		draw_points.push_back(i);
-	}
-}
-
-void SpecificWorker::draw_collisions()
-{
-	static std::vector<QGraphicsItem*> draw_points;
-	for (const auto &p : draw_points)
-	{
-		viewer->scene.removeItem(p);
-		delete p;
-	}
-	draw_points.clear();
-
-	// FRONT LINE
-	QLineF frontLine(QPointF(-Params_ROBOT_LENGTH/2, front_distance), QPointF(Params_ROBOT_LENGTH/2, front_distance));
-	draw_points.push_back(viewer->scene.addLine(frontLine, QPen(QColor("Red"), 30)));
-
-	// RIGHT LINE
-	QLineF rightLine(QPointF(right_distance, WIDTH_DISTANCES), QPointF(right_distance, -WIDTH_DISTANCES));
-	draw_points.push_back(viewer->scene.addLine(rightLine, QPen(QColor("Red"), 30)));
-
-	// LEFT LINE
-	QLineF leftLine(QPointF(-left_distance, WIDTH_DISTANCES), QPointF(-left_distance, -WIDTH_DISTANCES));
-	draw_points.push_back(viewer->scene.addLine(leftLine, QPen(QColor("Red"), 30))); // LEFT
-}
-
-
-void SpecificWorker::update_windows_values()
-{
-	this->lcdNumber_leftdist->display(left_distance);
-	this->lcdNumber_frontdist->display(front_distance);
-	this->lcdNumber_rightdist->display(right_distance);
-
-	this->lcdNumber_leftangle->display(qRadiansToDegrees(left_angle));
-	this->lcdNumber_rightangle->display(qRadiansToDegrees(right_angle));
-
-	switch (state)
-	{
-		case State::FOLLOW_WALL: this->label_state->setText("FOLLOW WALL"); break;
-		case State::FORWARD: this->label_state->setText("FORWARD"); break;
-		case State::SPIRAL: this->label_state->setText("SPIRAL"); break;
-		case State::TURN: this->label_state->setText("TURN"); break;
-		default: this->label_state->setText("OFF"); break;
-	}
-
-	this->lcdNumber_xpos->display(robot_pose.translation().x());
-	this->lcdNumber_ypos->display(robot_pose.translation().y());
-	this->lcdNumber_angle->display(qRadiansToDegrees(std::atan2(robot_pose.rotation()(1, 0), robot_pose.rotation()(0, 0))));
-
-	this->lcdNumber_adv->display(advance);
-	this->lcdNumber_rot->display(qRadiansToDegrees(rotation));
-	switch (rotation_direction)
-	{
-		case RotationDirection::RIGHT: this->label_rotdirection->setText("RIGHT"); break;
-		case RotationDirection::NONE: this->label_rotdirection->setText("NONE"); break;
-		case RotationDirection::LEFT: this->label_rotdirection->setText("LEFT"); break;
-	}
+	auto center_values = center_opt.value();
+	const auto center = viewer->scene.addEllipse(-100, -100, 200, 200, QPen(QColor("red")), QBrush(QColor("red")));
+	center->setPos(center_values.x(), center_values.y());
+	draw_points.push_back(center);
 }
 
 void SpecificWorker::update_robot_position()
 {
 	try
 	{
-		room_draw_robot->setPos(robot_pose.translation().x(), robot_pose.translation().y());
+		robot_room_draw->setPos(robot_pose.translation().x(), robot_pose.translation().y());
 		double angle = std::atan2(robot_pose.rotation()(1, 0), robot_pose.rotation()(0, 0));
-		room_draw_robot->setRotation(qRadiansToDegrees(angle));
+		robot_room_draw->setRotation(qRadiansToDegrees(angle));
 	}
 	catch (const Ice::Exception &e){std::cout << e.what() << std::endl;}
 }
@@ -320,237 +222,19 @@ void SpecificWorker::update_robot_position()
 
 void SpecificWorker::new_target_slot(QPointF p){}
 
-void SpecificWorker::calculateDistances(const RoboCompLidar3D::TPoints &points)
+SpecificWorker::RetVal SpecificWorker::process_state(const RoboCompLidar3D::TPoints &data, const Corners &corners, const Match &match, AbstractGraphicViewer *viewer)
 {
-	float front_min = 9999, left_min = 9999, right_min = 9999;
-
-	RoboCompLidar3D::TPoint right_initPoint;	right_initPoint.x = 9999;
-	const RoboCompLidar3D::TPoint *rightUpper_point = &right_initPoint;
-	const RoboCompLidar3D::TPoint *rightLower_point = &right_initPoint;
-
-	RoboCompLidar3D::TPoint left_initPoint;	left_initPoint.x = -9999;
-	const RoboCompLidar3D::TPoint *leftUpper_point = &left_initPoint;
-	const RoboCompLidar3D::TPoint *leftLower_point = &left_initPoint;
-	for (const auto &point: points)
+	switch(state)
 	{
-		//FRONT
-		if (point.x < ROBOT_SECTION && point.x > -ROBOT_SECTION && point.y >= 0)
-		{
-			if (point.y < front_min)	front_min = point.y;
-			continue;
-		}
-
-		// RIGHT
-		if (point.y < Params_ROBOT_LENGTH && point.y > -Params_ROBOT_LENGTH && point.x >= 0)
-		{
-			if (point.y < WIDTH_DISTANCES && point.y > -WIDTH_DISTANCES)
-			{
-				if (point.x < right_min)	right_min = point.x;
-				// UPPER
-				if (point.y < WIDTH_DISTANCES && point.y > 0)
-				{
-					if (point.x < rightUpper_point->x)	rightUpper_point = &point;
-					continue;
-				}
-				// LOWER
-				if (point.y < 0 && point.y > -WIDTH_DISTANCES)
-				{
-					if (point.x < rightLower_point->x)	rightLower_point = &point;
-				}
-				continue;
-			}
-			continue;
-		}
-
-		// LEFT
-		if (point.y < Params_ROBOT_LENGTH && point.y > -Params_ROBOT_LENGTH && point.x <= 0)
-		{
-			// MIDDLE
-			if (point.y < WIDTH_DISTANCES && point.y > -WIDTH_DISTANCES)
-			{
-				if (-point.x < left_min)	left_min = -point.x;
-				// UPPER
-				if (point.y < WIDTH_DISTANCES && point.y > 0)
-				{
-					if (point.x > leftUpper_point->x)	leftUpper_point = &point;
-					continue;
-				}
-				// LOWER
-				if (point.y < 0 && point.y > -WIDTH_DISTANCES)
-				{
-					if (point.x > leftLower_point->x)	leftLower_point = &point;
-				}
-				continue;
-			}
-			continue;
-		}
-	}
-
-	front_distance = front_min;
-	right_distance = right_min;
-	left_distance = left_min;
-
-	right_angle = 0.0f;
-	left_angle = 0.0f;
-
-	if (rightUpper_point != &right_initPoint && rightLower_point != &right_initPoint)
-		right_angle = atan2(rightUpper_point->y - rightLower_point->y, rightUpper_point->x - rightLower_point->x) - M_PI_2;
-	if (leftUpper_point != &left_initPoint && leftLower_point != &left_initPoint)
-		left_angle = atan2(leftUpper_point->y - leftLower_point->y, leftUpper_point->x - leftLower_point->x) - M_PI_2;
-}
-
-void SpecificWorker::set_robot_speed(float advx, float advy, float rot)
-{
-	advance = std::hypot(advx, advy);
-	rotation = rot;
-
-	if (rot == 0) rotation_direction = RotationDirection::NONE;
-
-	switch (rotation_direction) {
-		case RotationDirection::RIGHT: omnirobot_proxy->setSpeedBase(advx, advy, rotation); break;
-		case RotationDirection::NONE: omnirobot_proxy->setSpeedBase(advx, advy, 0); break;
-		case RotationDirection::LEFT: omnirobot_proxy->setSpeedBase(advx, advy, -rotation); break;
+		case STATE::IDLE:               return localise(match);
+		case STATE::LOCALISE:           return localise(match);
+		case STATE::GOTO_DOOR:          return goto_door(data);
+		case STATE::TURN:               return turn(corners);
+		case STATE::ORIENT_TO_DOOR:     return orient_to_door(data);
+		case STATE::GOTO_ROOM_CENTER:   return goto_room_center(data);
+		case STATE::CROSS_DOOR:         return cross_door(data);
 	}
 }
-
-RotationDirection SpecificWorker::evaluate_rotation_direction(float rot)
-{
-	if (rot > 0) return RotationDirection::RIGHT;
-	if (rot < 0) return RotationDirection::LEFT;
-	return RotationDirection::NONE;
-}
-
-void SpecificWorker::doStateMachine()
-{
-	switch (state)
-	{
-		case State::SPIRAL:
-			spiral_state();
-			break;
-		case State::FORWARD:
-			forward_state();
-			break;
-		case State::TURN:
-			turn_state();
-			break;
-		case State::FOLLOW_WALL:
-			followWall_state();
-			break;
-		case State::OFF:
-			break;
-	}
-}
-
-void SpecificWorker::doState2Machine()
-{
-	switch(state2) {
-	case STATE::IDLE:               return "IDLE";
-	case STATE::LOCALISE:           return "LOCALISE";
-	case STATE::GOTO_DOOR:          return "GOTO_DOOR";
-	case STATE::TURN:               return "TURN";
-	case STATE::ORIENT_TO_DOOR:     return "ORIENT_TO_DOOR";
-	case STATE::GOTO_ROOM_CENTER:   return "GOTO_ROOM_CENTER";
-	case STATE::CROSS_DOOR:         return "CROSS_DOOR";
-	case STATE::OFF:				return "OFF";
-	default:                        return "UNKNOWN";
-	}
-}
-
-void SpecificWorker::forward_state()
-{
-	if (front_distance < OBSTACLE_DIST)
-	{
-		state = State::TURN;
-		set_robot_speed(0,0,0);
-		qInfo() << "Obstaculo encontrado, girando...";
-		return;
-	}
-
-	rotation_direction = RotationDirection::NONE;
-	set_robot_speed(0,MAX_ADV,0);
-}
-
-void SpecificWorker::turn_state()
-{
-	if (front_distance > OBSTACLE_DIST*1.5)
-	{
-		set_robot_speed(0,0,0);
-		state = stateRandomizer();
-		return;
-	}
-
-	if (rotation_direction == RotationDirection::NONE)
-	{
-		rotation_direction = (right_distance > left_distance) ? RotationDirection::RIGHT : RotationDirection::LEFT;
-		return;
-	}
-
-	set_robot_speed(0,0,MAX_ROT);
-}
-
-void SpecificWorker::followWall_state()
-{
-	if (front_distance < OBSTACLE_DIST)
-	{
-		set_robot_speed(0, 0, 0);
-		state = State::TURN;
-		return;
-	}
-
-	const float Kp_angle = 1.0f;   // Para corrección de orientación
-
-	// Calculamos corrección por ángulo
-	float rotation_angle_correction = 0.0f;
-	rotation_angle_correction -= Kp_angle * right_angle;
-	rotation_angle_correction -= Kp_angle * left_angle;
-
-	// Velocidad angular final
-	float rotation = rotation_angle_correction;
-
-	// Limitamos la velocidad de giro
-	if (rotation > MAX_ROT) rotation = MAX_ROT;
-	if (rotation < -MAX_ROT) rotation = -MAX_ROT;
-	if (rotation > -0.01f && rotation < 0.1f) rotation = 0;
-
-	rotation_direction = evaluate_rotation_direction(rotation);
-	set_robot_speed(0, MAX_ADV, std::abs(rotation));
-}
-
-void SpecificWorker::spiral_state()
-{
-	if((front_distance < OBSTACLE_DIST || rotation > MAX_ROT || advance < MAX_ADV/4.5) && (rotation_direction != RotationDirection::NONE))
-	{
-		set_robot_speed(0,0,0);
-		state = State::TURN;
-		return;
-	}
-
-	if (rotation_direction == RotationDirection::NONE)
-	{
-		rotation_direction = (right_distance > left_distance) ? RotationDirection::RIGHT : RotationDirection::LEFT;
-		rotation = MAX_ROT;
-		advance = MAX_ADV;
-		return;
-	}
-
-	advance -= MAX_ADV / advance;
-
-	set_robot_speed(0,advance,rotation);
-}
-
-State SpecificWorker::stateRandomizer()
-{
-	int random_num = rand() % 2;
-	switch (random_num)
-	{
-	case 0:
-		return State::SPIRAL;
-	case 1:
-		return State::FOLLOW_WALL;
-	}
-	return State::TURN;
-}
-
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -584,17 +268,13 @@ int SpecificWorker::startup_check()
 
 void SpecificWorker::doStartStop()
 {
-	if (state == State::OFF)
+	if (state == STATE::IDLE)
 	{
-		state = stateRandomizer();
-		rotation_direction = RotationDirection::NONE;
 		this->pushButton_startstop->setText("Stop");
 		return;
 	}
 
-	state = State::OFF;
-	rotation_direction = RotationDirection::NONE;
-	set_robot_speed(0,0,0);
+	state = STATE::IDLE;
 	this->pushButton_startstop->setText("Start");
 }
 
