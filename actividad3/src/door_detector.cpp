@@ -6,10 +6,48 @@
 #include <cppitertools/sliding_window.hpp>
 #include <cppitertools/combinations.hpp>
 #include <QGraphicsItem>
+#include <cmath>
+
+#include "specificworker.h"
 
 
 Doors DoorDetector::detect(const RoboCompLidar3D::TPoints &points, QGraphicsScene *scene)
 {
+
+    // Vector para almacenar los picos
+    Peaks peaks;
+
+    auto pairs = points | iter::sliding_window(2);
+    for (const auto &pair: pairs)
+    {
+        auto point1 = pair[0];
+        auto point2 = pair[1];
+
+        if ((point2.distance2d - point1.distance2d) < 1000)
+        {
+            continue;
+        }
+
+        auto min_distance = (point1 < point2) ? point1.distance2d : point2.distance2d;
+        peaks.emplace_back(pair, min_distance);
+    }
+
+    // Aplicar Non-Maximun Supression (NMS)
+    Peaks nms_peaks;
+    for (const auto &[p, a] : peaks)
+    {
+        if (const bool to_close = std::ranges::any_of(nms_peaks, [&p](const auto &p2) {return (p - std::get<0>(p2)).norm() < 500.f;}); not to_close)
+            nms_peaks.emplace_back(p, a);
+
+        peaks = nms_peaks;
+    }
+
+    // Detectamos puertas (picos entre 800mm y 1200mm)
+    Doors doors;
+
+    for (const auto &[p1, _] :  iter::combinations(peaks, 2);
+
+
    return Doors();
 }
 

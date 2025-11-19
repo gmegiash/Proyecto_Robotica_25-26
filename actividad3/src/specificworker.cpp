@@ -83,7 +83,6 @@ void SpecificWorker::initialize()
 	}
 
 	connect(pushButton_startstop, SIGNAL(clicked()), this, SLOT(doStartStop()));
-	connect(viewer, &AbstractGraphicViewer::new_mouse_coordinates, this, &SpecificWorker::new_target_slot);
 
 }
 
@@ -135,51 +134,53 @@ void SpecificWorker::compute()
 	robot_room_draw->setRotation(angle);
 }
 
-RoboCompLidar3D::TPoints SpecificWorker::read_data()
+SpecificWorker::RetVal SpecificWorker::localise(const Match &match)
 {
-	auto data = lidar3d_proxy->getLidarDataWithThreshold2d("helios", 12000, 1);
 
-	return door_detector.filter_points(data.points, &viewer->scene);
 }
 
-
-
-RoboCompLidar3D::TPoints SpecificWorker::filter_isolated_points(const RoboCompLidar3D::TPoints &points, float d) // set to 200mm
+SpecificWorker::RetVal SpecificWorker::goto_door(const RoboCompLidar3D::TPoints &points)
 {
-	if (points.empty()) return {};
 
-	const float d_squared = d * d;  // Avoid sqrt by comparing squared distances
-	std::vector<bool> hasNeighbor(points.size(), false);
+}
 
-	// Create index vector for parallel iteration
-	std::vector<size_t> indices(points.size());
-	std::iota(indices.begin(), indices.end(), size_t{0});
+SpecificWorker::RetVal SpecificWorker::turn(const Corners &corners)
+{
 
-	// Parallelize outer loop - each thread checks one point
-	std::for_each(std::execution::par, indices.begin(), indices.end(), [&](size_t i)
-		{
-			const auto& p1 = points[i];
-			// Sequential inner loop (avoid nested parallelism)
-			for (auto &&[j,p2] : iter::enumerate(points))
-			{
-				if (i == j) continue;
-				const float dx = p1.x - p2.x;
-				const float dy = p1.y - p2.y;
-				if (dx * dx + dy * dy <= d_squared)
-				{
-					hasNeighbor[i] = true;
-					break;
-				}
-			}
-	});
+}
 
-	// Collect results
-	std::vector<RoboCompLidar3D::TPoint> result;
-	result.reserve(points.size());
-	for (auto &&[i, p] : iter::enumerate(points))
-		if (hasNeighbor[i])
-			result.push_back(points[i]);
-	return result;
+SpecificWorker::RetVal SpecificWorker::orient_to_door(const RoboCompLidar3D::TPoints &points)
+{
+
+}
+
+SpecificWorker::RetVal SpecificWorker::goto_room_center(const RoboCompLidar3D::TPoints &points)
+{
+
+}
+
+SpecificWorker::RetVal SpecificWorker::cross_door(const RoboCompLidar3D::TPoints &points)
+{
+
+}
+
+SpecificWorker::RetVal SpecificWorker::update_pose(const Corners &corners, const Match &match)
+{
+
+}
+
+SpecificWorker::RetVal SpecificWorker::process_state(const RoboCompLidar3D::TPoints &data, const Corners &corners, const Match &match, AbstractGraphicViewer *viewer)
+{
+	switch(state)
+	{
+		case STATE::IDLE:               return localise(match);
+		case STATE::LOCALISE:           return localise(match);
+		case STATE::GOTO_DOOR:          return goto_door(data);
+		case STATE::TURN:               return turn(corners);
+		case STATE::ORIENT_TO_DOOR:     return orient_to_door(data);
+		case STATE::GOTO_ROOM_CENTER:   return goto_room_center(data);
+		case STATE::CROSS_DOOR:         return cross_door(data);
+	}
 }
 
 void SpecificWorker::draw_lidar(const auto &points,  std::optional<Eigen::Vector2d> center_opt)
@@ -219,21 +220,66 @@ void SpecificWorker::update_robot_position()
 	catch (const Ice::Exception &e){std::cout << e.what() << std::endl;}
 }
 
-
-void SpecificWorker::new_target_slot(QPointF p){}
-
-SpecificWorker::RetVal SpecificWorker::process_state(const RoboCompLidar3D::TPoints &data, const Corners &corners, const Match &match, AbstractGraphicViewer *viewer)
+RoboCompLidar3D::TPoints SpecificWorker::read_data()
 {
-	switch(state)
-	{
-		case STATE::IDLE:               return localise(match);
-		case STATE::LOCALISE:           return localise(match);
-		case STATE::GOTO_DOOR:          return goto_door(data);
-		case STATE::TURN:               return turn(corners);
-		case STATE::ORIENT_TO_DOOR:     return orient_to_door(data);
-		case STATE::GOTO_ROOM_CENTER:   return goto_room_center(data);
-		case STATE::CROSS_DOOR:         return cross_door(data);
-	}
+	auto data = lidar3d_proxy->getLidarDataWithThreshold2d("helios", 12000, 1);
+
+	return door_detector.filter_points(data.points, &viewer->scene);
+}
+
+RoboCompLidar3D::TPoints SpecificWorker::filter_isolated_points(const RoboCompLidar3D::TPoints &points, float d) // set to 200mm
+{
+	if (points.empty()) return {};
+
+	const float d_squared = d * d;  // Avoid sqrt by comparing squared distances
+	std::vector<bool> hasNeighbor(points.size(), false);
+
+	// Create index vector for parallel iteration
+	std::vector<size_t> indices(points.size());
+	std::iota(indices.begin(), indices.end(), size_t{0});
+
+	// Parallelize outer loop - each thread checks one point
+	std::for_each(std::execution::par, indices.begin(), indices.end(), [&](size_t i)
+		{
+			const auto& p1 = points[i];
+			// Sequential inner loop (avoid nested parallelism)
+			for (auto &&[j,p2] : iter::enumerate(points))
+			{
+				if (i == j) continue;
+				const float dx = p1.x - p2.x;
+				const float dy = p1.y - p2.y;
+				if (dx * dx + dy * dy <= d_squared)
+				{
+					hasNeighbor[i] = true;
+					break;
+				}
+			}
+	});
+
+	// Collect results
+	std::vector<RoboCompLidar3D::TPoint> result;
+	result.reserve(points.size());
+	for (auto &&[i, p] : iter::enumerate(points))
+		if (hasNeighbor[i])
+			result.push_back(points[i]);
+	return result;
+}
+
+void SpecificWorker::print_match(const Match &match, const float error =1.f) const
+{
+
+}
+
+bool SpecificWorker::update_robot_pose(const Corners &corners, const Match &match)
+{
+
+
+
+}
+
+void SpecificWorker::move_robot(float adv, float rot, float max_match_error)
+{
+
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -277,6 +323,8 @@ void SpecificWorker::doStartStop()
 	state = STATE::IDLE;
 	this->pushButton_startstop->setText("Start");
 }
+
+
 
 
 /**************************************/

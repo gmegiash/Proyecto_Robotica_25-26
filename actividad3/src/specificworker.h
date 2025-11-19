@@ -101,8 +101,6 @@ public slots:
 
 	void doStartStop();
 
-	void new_target_slot(QPointF);
-
 
 private:
 
