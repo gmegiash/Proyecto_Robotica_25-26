@@ -24,7 +24,7 @@ GenericWorker::GenericWorker(const ConfigLoader& configLoader, TuplePrx tprx) : 
 {
 
 	this->configLoader = configLoader;
-	
+
 	camera360rgb_proxy = std::get<0>(tprx);
 	lidar3d_proxy = std::get<1>(tprx);
 	omnirobot_proxy = std::get<2>(tprx);
@@ -134,7 +134,7 @@ void GenericWorker::hibernationCheck()
     }
 }
 
-void GenericWorker::hibernationTick(){
+void GenericWorker::hibernationTick() {
 	hibernation = true;
 }
 

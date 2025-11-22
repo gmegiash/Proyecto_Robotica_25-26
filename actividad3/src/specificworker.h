@@ -155,12 +155,11 @@ private:
 	rc::Hungarian hungarian;
 
 	// state machine
-	enum class STATE {GOTO_DOOR, ORIENT_TO_DOOR, LOCALISE, GOTO_ROOM_CENTER, TURN, IDLE, CROSS_DOOR};
+	enum class STATE {GOTO_DOOR, ORIENT_TO_DOOR, GOTO_ROOM_CENTER, TURN, IDLE, CROSS_DOOR};
 	inline const char* to_string(const STATE s) const
 	{
 		switch(s) {
 			case STATE::IDLE:               return "IDLE";
-			case STATE::LOCALISE:           return "LOCALISE";
 			case STATE::GOTO_DOOR:          return "GOTO_DOOR";
 			case STATE::TURN:               return "TURN";
 			case STATE::ORIENT_TO_DOOR:     return "ORIENT_TO_DOOR";
@@ -169,10 +168,9 @@ private:
 			default:                        return "UNKNOWN";
 		}
 	}
-	STATE state = STATE::LOCALISE;
+	STATE state = STATE::GOTO_ROOM_CENTER;
 	using RetVal = std::tuple<STATE, float, float>;
 
-	RetVal localise(const Match &match);
 	RetVal goto_door(const RoboCompLidar3D::TPoints &points);
 	RetVal turn(const Corners &corners);
 	RetVal orient_to_door(const RoboCompLidar3D::TPoints &points);
@@ -209,7 +207,7 @@ private:
 	// timing
 	std::chrono::time_point<std::chrono::high_resolution_clock> last_time = std::chrono::high_resolution_clock::now();
 
-	//relocalization
+	// relocalization
 	bool relocal_centered = false;
 	bool localised = false;
 

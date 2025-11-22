@@ -6,18 +6,18 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>1028</width>
-    <height>554</height>
+    <width>1224</width>
+    <height>773</height>
    </rect>
   </property>
   <property name="windowTitle">
    <string>Localiser</string>
   </property>
-  <layout class="QHBoxLayout" name="horizontalLayout_10">
+  <layout class="QVBoxLayout" name="verticalLayout_5">
    <item>
-    <layout class="QVBoxLayout" name="verticalLayout_5">
+    <layout class="QVBoxLayout" name="verticalLayout_2">
      <item>
-      <layout class="QHBoxLayout" name="horizontalLayout_9">
+      <layout class="QHBoxLayout" name="horizontalLayout_17">
        <item>
         <widget class="QFrame" name="frame">
          <property name="sizePolicy">
@@ -65,9 +65,9 @@
       </layout>
      </item>
      <item>
-      <layout class="QVBoxLayout" name="verticalLayout_2">
+      <layout class="QHBoxLayout" name="horizontalLayout_9">
        <item>
-        <layout class="QHBoxLayout" name="horizontalLayout_13">
+        <layout class="QHBoxLayout" name="horizontalLayout_18">
          <item>
           <layout class="QVBoxLayout" name="verticalLayout">
            <item>
@@ -77,12 +77,12 @@
                <item>
                 <widget class="QLabel" name="label">
                  <property name="text">
-                  <string>Left d.</string>
+                  <string>X</string>
                  </property>
                 </widget>
                </item>
                <item>
-                <widget class="QLCDNumber" name="lcdNumber_leftdist">
+                <widget class="QLCDNumber" name="lcdNumber_x">
                  <property name="font">
                   <font>
                    <bold>true</bold>
@@ -97,12 +97,12 @@
                <item>
                 <widget class="QLabel" name="label_2">
                  <property name="text">
-                  <string>Front d.</string>
+                  <string>Y</string>
                  </property>
                 </widget>
                </item>
                <item>
-                <widget class="QLCDNumber" name="lcdNumber_frontdist">
+                <widget class="QLCDNumber" name="lcdNumber_y">
                  <property name="font">
                   <font>
                    <bold>true</bold>
@@ -117,69 +117,12 @@
                <item>
                 <widget class="QLabel" name="label_3">
                  <property name="text">
-                  <string>Right d.</string>
+                  <string>angle</string>
                  </property>
                 </widget>
                </item>
                <item>
-                <widget class="QLCDNumber" name="lcdNumber_rightdist">
-                 <property name="font">
-                  <font>
-                   <bold>true</bold>
-                  </font>
-                 </property>
-                </widget>
-               </item>
-              </layout>
-             </item>
-            </layout>
-           </item>
-           <item>
-            <layout class="QHBoxLayout" name="horizontalLayout_12">
-             <item>
-              <layout class="QHBoxLayout" name="horizontalLayout_22">
-               <item>
-                <widget class="QLabel" name="label_15">
-                 <property name="text">
-                  <string>Left angle</string>
-                 </property>
-                </widget>
-               </item>
-               <item>
-                <widget class="QLCDNumber" name="lcdNumber_leftangle">
-                 <property name="font">
-                  <font>
-                   <bold>true</bold>
-                  </font>
-                 </property>
-                </widget>
-               </item>
-              </layout>
-             </item>
-             <item>
-              <spacer name="horizontalSpacer_2">
-               <property name="orientation">
-                <enum>Qt::Horizontal</enum>
-               </property>
-               <property name="sizeHint" stdset="0">
-                <size>
-                 <width>40</width>
-                 <height>20</height>
-                </size>
-               </property>
-              </spacer>
-             </item>
-             <item>
-              <layout class="QHBoxLayout" name="horizontalLayout_18">
-               <item>
-                <widget class="QLabel" name="label_14">
-                 <property name="text">
-                  <string>Right angle</string>
-                 </property>
-                </widget>
-               </item>
-               <item>
-                <widget class="QLCDNumber" name="lcdNumber_rightangle">
+                <widget class="QLCDNumber" name="lcdNumber_angle">
                  <property name="font">
                   <font>
                    <bold>true</bold>
@@ -223,132 +166,17 @@
              </item>
             </layout>
            </item>
-          </layout>
-         </item>
-         <item>
-          <spacer name="horizontalSpacer_3">
-           <property name="orientation">
-            <enum>Qt::Horizontal</enum>
-           </property>
-           <property name="sizeHint" stdset="0">
-            <size>
-             <width>40</width>
-             <height>20</height>
-            </size>
-           </property>
-          </spacer>
-         </item>
-         <item>
-          <layout class="QVBoxLayout" name="verticalLayout_3">
-           <item>
-            <layout class="QHBoxLayout" name="horizontalLayout_19">
-             <item>
-              <widget class="QLabel" name="label_11">
-               <property name="text">
-                <string>X</string>
-               </property>
-              </widget>
-             </item>
-             <item>
-              <widget class="QLCDNumber" name="lcdNumber_xpos">
-               <property name="font">
-                <font>
-                 <bold>true</bold>
-                </font>
-               </property>
-              </widget>
-             </item>
-            </layout>
-           </item>
-           <item>
-            <layout class="QHBoxLayout" name="horizontalLayout_20">
-             <item>
-              <widget class="QLabel" name="label_12">
-               <property name="text">
-                <string>Y</string>
-               </property>
-              </widget>
-             </item>
-             <item>
-              <widget class="QLCDNumber" name="lcdNumber_ypos">
-               <property name="font">
-                <font>
-                 <bold>true</bold>
-                </font>
-               </property>
-              </widget>
-             </item>
-            </layout>
-           </item>
-           <item>
-            <layout class="QHBoxLayout" name="horizontalLayout_21">
-             <item>
-              <widget class="QLabel" name="label_13">
-               <property name="text">
-                <string>angle</string>
-               </property>
-              </widget>
-             </item>
-             <item>
-              <widget class="QLCDNumber" name="lcdNumber_angle">
-               <property name="font">
-                <font>
-                 <bold>true</bold>
-                </font>
-               </property>
-              </widget>
-             </item>
-            </layout>
-           </item>
-          </layout>
-         </item>
-        </layout>
-       </item>
-       <item>
-        <layout class="QHBoxLayout" name="horizontalLayout_35">
-         <item>
-          <layout class="QHBoxLayout" name="horizontalLayout_33">
-           <item>
-            <layout class="QHBoxLayout" name="horizontalLayout_11">
-             <item>
-              <widget class="QLabel" name="label_state_name_4">
-               <property name="text">
-                <string>Rot. Dir:</string>
-               </property>
-              </widget>
-             </item>
-             <item>
-              <widget class="QLabel" name="label_rotdirection">
-               <property name="frameShape">
-                <enum>QFrame::Box</enum>
-               </property>
-               <property name="frameShadow">
-                <enum>QFrame::Raised</enum>
-               </property>
-               <property name="text">
-                <string>TextLabel</string>
-               </property>
-              </widget>
-             </item>
-            </layout>
-           </item>
            <item>
             <layout class="QHBoxLayout" name="horizontalLayout">
              <item>
               <widget class="QLabel" name="label_state_name">
                <property name="text">
-                <string>State:</string>
+                <string>state:</string>
                </property>
               </widget>
              </item>
              <item>
               <widget class="QLabel" name="label_state">
-               <property name="frameShape">
-                <enum>QFrame::Box</enum>
-               </property>
-               <property name="frameShadow">
-                <enum>QFrame::Raised</enum>
-               </property>
                <property name="text">
                 <string>TextLabel</string>
                </property>
@@ -359,7 +187,7 @@
           </layout>
          </item>
          <item>
-          <spacer name="horizontalSpacer_6">
+          <spacer name="horizontalSpacer">
            <property name="orientation">
             <enum>Qt::Horizontal</enum>
            </property>
@@ -372,9 +200,9 @@
           </spacer>
          </item>
          <item>
-          <widget class="QPushButton" name="pushButton_startstop">
+          <widget class="QPushButton" name="pushButton_stop">
            <property name="text">
-            <string>Start</string>
+            <string>Stop</string>
            </property>
            <property name="checkable">
             <bool>true</bool>
@@ -383,7 +211,36 @@
          </item>
         </layout>
        </item>
+       <item>
+        <widget class="QFrame" name="frame_plot_error">
+         <property name="minimumSize">
+          <size>
+           <width>500</width>
+           <height>0</height>
+          </size>
+         </property>
+         <property name="frameShape">
+          <enum>QFrame::StyledPanel</enum>
+         </property>
+         <property name="frameShadow">
+          <enum>QFrame::Raised</enum>
+         </property>
+        </widget>
+       </item>
       </layout>
+     </item>
+     <item>
+      <widget class="QLabel" name="label_img">
+       <property name="minimumSize">
+        <size>
+         <width>300</width>
+         <height>100</height>
+        </size>
+       </property>
+       <property name="text">
+        <string>TextLabel</string>
+       </property>
+      </widget>
      </item>
     </layout>
    </item>
