@@ -182,10 +182,11 @@ SpecificWorker::RetVal SpecificWorker::goto_door(const RoboCompLidar3D::TPoints 
 
 SpecificWorker::RetVal SpecificWorker::turn(const Corners &corners)
 {
-	auto [detected,left_right] = image_processor.check_colour_patch_in_image(camera360rgb_proxy, "red");
+	auto [detected,left_right] = rc::ImageProcessor::check_colour_patch_in_image(camera360rgb_proxy, "red");
 	if (detected)
 	{
-		return 	{STATE::GOTO_DOOR, 0,0};
+		localised = true;
+		return 	{STATE::IDLE, 0,0};
 	}
 
 	auto rot = params.RELOCAL_ROT_SPEED;

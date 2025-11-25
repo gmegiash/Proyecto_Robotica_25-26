@@ -3,7 +3,7 @@
 #include <QRectF>
 #include <Eigen/Dense>
 #include <vector>
-#include "src/common_types.h"
+#include "common_types.h"
 
   struct NominalRoom
         {

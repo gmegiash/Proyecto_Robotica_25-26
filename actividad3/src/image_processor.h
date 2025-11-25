@@ -84,6 +84,7 @@ namespace rc
 
             cv::Point2f bestCenter(static_cast<float>(mu.m10 / mu.m00), static_cast<float>(mu.m01 / mu.m00));
 
+            qInfo() << bestCenter.x << bestCenter.y;
             // decide turning direction: default right (1), left (-1)
             int left_right = 1;
             if (bestCenter.x < (display_img.cols / 2) && bestCenter.x > 0)
