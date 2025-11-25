@@ -48,6 +48,7 @@
 #include "door_detector.h"
 #include "image_processor.h"
 #include <expected>
+#include "pointcloud_center_estimator.h"
 
 /**
  * \brief Class SpecificWorker implements the core functionality of the component.
@@ -130,7 +131,7 @@ private:
 		QRectF GRID_MAX_DIM{-5000, 2500, 10000, -5000};
 
 		// relocalization
-		float RELOCAL_CENTER_EPS = 300.f;    // mm: stop when |mean| < eps
+		float RELOCAL_CENTER_EPS = 50.f;    // mm: stop when |mean| < eps
 		float RELOCAL_KP = 0.002f;           // gain to convert mean (mm) -> speed (magnitude)
 		float RELOCAL_MAX_ADV = 300.f;       // mm/s cap while re-centering
 		float RELOCAL_MAX_SIDE = 300.f;      // mm/s cap while re-centering
@@ -153,6 +154,8 @@ private:
 	std::vector<NominalRoom> nominal_rooms{ NominalRoom{5500.f, 4000.f}, NominalRoom{8000.f, 4000.f}};
 	rc::Room_Detector room_detector;
 	rc::Hungarian hungarian;
+	rc::PointcloudCenterEstimator center_estimator;
+	std::optional<Eigen::Vector2d> estimated_center;
 
 	// state machine
 	enum class STATE {GOTO_DOOR, ORIENT_TO_DOOR, GOTO_ROOM_CENTER, TURN, IDLE, CROSS_DOOR};
@@ -180,7 +183,7 @@ private:
 	RetVal process_state(const RoboCompLidar3D::TPoints &data, const Corners &corners, const Match &match, AbstractGraphicViewer *viewer);
 
 	// draw
-	void draw_lidar(const auto &points, std::optional<Eigen::Vector2d> center_opt);
+	void draw_lidar(const auto &points, std::optional<Eigen::Vector2d> center_opt, QGraphicsScene *scene);
 	void update_robot_position();
 
 	// aux

@@ -121,11 +121,12 @@ void SpecificWorker::initialize()
 void SpecificWorker::compute()
 {
 	auto data = read_data();
+	data = door_detector.filter_points(filter_isolated_points(data, 100), &viewer->scene);
 
 	// compute corners
-	const auto &[corners, lines] = room_detector.compute_corners(door_detector.filter_points(data,&viewer->scene), &viewer->scene);
-	const auto center_opt = room_detector.estimate_center_from_walls();
-	draw_lidar(door_detector.filter_points(data,&viewer->scene), center_opt);
+	const auto &[corners, lines] = room_detector.compute_corners(data);
+	estimated_center = center_estimator.estimate(data);
+	draw_lidar(door_detector.filter_points(data,&viewer->scene), estimated_center, &viewer->scene);
 	// match corners  transforming first nominal corners to robot's frame
 	const auto match = hungarian.match(corners,
 											  nominal_rooms[0].transform_corners_to(robot_pose.inverse()));
@@ -181,7 +182,16 @@ SpecificWorker::RetVal SpecificWorker::goto_door(const RoboCompLidar3D::TPoints 
 
 SpecificWorker::RetVal SpecificWorker::turn(const Corners &corners)
 {
+	auto [detected,left_right] = image_processor.check_colour_patch_in_image(camera360rgb_proxy, "red");
+	if (detected)
+	{
+		return 	{STATE::GOTO_DOOR, 0,0};
+	}
 
+	auto rot = params.RELOCAL_ROT_SPEED;
+	if (left_right == -1)	rot = -rot;
+
+	return 	{STATE::TURN, 0, rot};
 }
 
 SpecificWorker::RetVal SpecificWorker::orient_to_door(const RoboCompLidar3D::TPoints &points)
@@ -191,11 +201,11 @@ SpecificWorker::RetVal SpecificWorker::orient_to_door(const RoboCompLidar3D::TPo
 
 SpecificWorker::RetVal SpecificWorker::goto_room_center(const RoboCompLidar3D::TPoints &points)
 {
-	//Encontramos el centro geometrico de la habitacion
-	std::optional<Eigen::Vector2d> center_opt = room_detector.estimate_center_from_walls();
-
-	if (center_opt.has_value()) {
-		Eigen::Vector2f target = center_opt.value().cast<float>();
+	if (estimated_center.has_value()) {
+		if (estimated_center.value().norm() < params.RELOCAL_CENTER_EPS) {
+			return {STATE::TURN, 0.f, 0.f};
+		}
+		Eigen::Vector2f target = estimated_center.value().cast<float>();
 
 		auto[adv, rot] = robot_controller(target);
 
@@ -227,12 +237,12 @@ SpecificWorker::RetVal SpecificWorker::process_state(const RoboCompLidar3D::TPoi
 	}
 }
 
-void SpecificWorker::draw_lidar(const auto &points,  std::optional<Eigen::Vector2d> center_opt)
+void SpecificWorker::draw_lidar(const auto &points,  std::optional<Eigen::Vector2d> center_opt, QGraphicsScene *scene)
 {
 	static std::vector<QGraphicsItem*> draw_points;
 	for (const auto &p : draw_points)
 	{
-		viewer->scene.removeItem(p);
+		scene->removeItem(p);
 		delete p;
 	}
 	draw_points.clear();
@@ -242,13 +252,13 @@ void SpecificWorker::draw_lidar(const auto &points,  std::optional<Eigen::Vector
 	//const QBrush brush(color, Qt::SolidPattern);
 	for (const auto &p : points)
 	{
-		const auto dp = viewer->scene.addRect(-25, -25, 50, 50, pen);
+		const auto dp = scene->addRect(-25, -25, 50, 50, pen);
 		dp->setPos(p.x, p.y);
 		draw_points.push_back(dp);   // add to the list of points to be deleted next time
 	}
 
 	auto center_values = center_opt.value();
-	const auto center = viewer->scene.addEllipse(-100, -100, 200, 200, QPen(QColor("red")), QBrush(QColor("red")));
+	const auto center = scene->addEllipse(-100, -100, 200, 200, QPen(QColor("red")), QBrush(QColor("red")));
 	center->setPos(center_values.x(), center_values.y());
 	draw_points.push_back(center);
 }
@@ -355,70 +365,6 @@ Eigen::Vector3d SpecificWorker::solve_pose(const Corners &corners, const Match &
 	return r;
 }
 
-/*std::tuple<float, float> SpecificWorker::robot_controller(const Eigen::Vector2f &target) {
-    // 1. Calcular Distancia (d) y Error Angular (theta_e) [cite: 436]
-    float d = target.norm();
-    float theta_e = std::atan2(target.y(), target.x());
-
-    // ---------------------------------------------------------
-    // PARÁMETROS DE SINTONIZACIÓN (Tuning Parameters)
-    // ---------------------------------------------------------
-    // Nota: El documento indica que las unidades son milímetros
-
-    // Ganancias del control rotacional
-    const float Kp = 1.5f; // [cite: 275] (Antes Kw)
-    // const float Kd = 0.0f; // Se puede añadir si tienes el error previo
-
-    // Parámetros del Freno Angular (Gaussian Angle-Brake) [cite: 342]
-    // sigma = 45 grados (aprox 0.78 rad) es un buen valor inicial.
-    const float sigma = M_PI / 4.0f;
-
-    // Parámetros del Freno de Distancia (Sigmoid Distance-Brake) [cite: 425]
-    // d_stop: Distancia donde empieza a frenar realmente (ej. 500mm)
-    const float d_stop = 500.0f;
-    // k: Pendiente de frenado.
-    // IMPORTANTE: Como trabajamos en mm, k debe ser pequeño (ej. 0.02 para mm equivale a k=20 para metros)
-    const float k_sigmoid = 0.02f;
-
-    // ---------------------------------------------------------
-    // CÁLCULO DE VELOCIDADES
-    // ---------------------------------------------------------
-
-    // 2. Control de Rotación (Solo P por ahora, ecuación w = Kp*theta) [cite: 437]
-    float w = Kp * theta_e;
-
-    // 3. Freno Angular (Gaussiana)
-    // Reduce la velocidad si el robot no está alineado con el objetivo
-    // f_theta tiende a 1 si theta_e es 0, tiende a 0 si theta_e es grande.
-    float f_theta = std::exp( - (theta_e * theta_e) / (2.0f * sigma * sigma) );
-
-    // 4. Freno de Distancia (Sigmoide)
-    // Reduce la velocidad cuando el robot se acerca al objetivo (d -> d_stop)
-    float f_d = 1.0f / (1.0f + std::exp( -k_sigmoid * (d - d_stop) ));
-
-    // 5. Velocidad Lineal Final (v)
-    // Modulamos la velocidad máxima con ambos frenos
-    float v = params.MAX_ADV_SPEED * f_theta * f_d;
-
-    // ---------------------------------------------------------
-    // SATURACIÓN Y SEGURIDAD
-    // ---------------------------------------------------------
-
-    // Comprobar si hemos llegado (Zona muerta final)
-    if (d < params.RELOCAL_CENTER_EPS) {
-       return std::make_tuple(0.f, 0.f);
-    }
-
-    // Saturación de velocidad angular (la lineal ya está escalada por v_max)
-    if (w > params.MAX_ROT_SPEED) w = params.MAX_ROT_SPEED;
-    if (w < -params.MAX_ROT_SPEED) w = -params.MAX_ROT_SPEED;
-
-    // Logging para depuración (opcional)
-    // qInfo() << "Dist:" << d << " Ang:" << theta_e << " f_theta:" << f_theta << " f_d:" << f_d << " v:" << v;
-
-    return std::make_tuple(v, w);
-}*/
-
 std::tuple<float, float> SpecificWorker::robot_controller(const Eigen::Vector2f &target) {
 	float distance = target.norm(); //Distancia euclidea
 
@@ -433,11 +379,6 @@ std::tuple<float, float> SpecificWorker::robot_controller(const Eigen::Vector2f 
 
 	const float Kv = 0.5f; //Ganancia lineal
 	const float Kw = 1.5f; //Ganancia angular
-
-	// Comprobar si hemos llegado
-	if (distance < params.RELOCAL_CENTER_EPS) {
-		return std::make_tuple(0.f, 0.f);
-	}
 
 	// Calcular velocidades
 	float adv = Kv * distance;

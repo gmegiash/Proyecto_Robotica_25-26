@@ -7,6 +7,7 @@ LIST(APPEND SOURCES
     ../src/door_detector.cpp
     ../src/qcustomplot.cpp
     ../src/time_series_plotter.cpp
+    ../src/pointcloud_center_estimator.cpp
 )
 
 # Headers set
