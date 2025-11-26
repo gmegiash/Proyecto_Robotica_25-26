@@ -174,13 +174,13 @@ private:
 	STATE state = STATE::GOTO_ROOM_CENTER;
 	using RetVal = std::tuple<STATE, float, float>;
 
-	RetVal goto_door(const RoboCompLidar3D::TPoints &points);
+	RetVal goto_door(const RoboCompLidar3D::TPoints &points, const Door &door);
 	RetVal turn(const Corners &corners);
 	RetVal orient_to_door(const RoboCompLidar3D::TPoints &points);
 	RetVal goto_room_center(const RoboCompLidar3D::TPoints &points);
 	RetVal cross_door(const RoboCompLidar3D::TPoints &points);
 	RetVal update_pose(const Corners &corners, const Match &match);
-	RetVal process_state(const RoboCompLidar3D::TPoints &data, const Corners &corners, const Match &match, AbstractGraphicViewer *viewer);
+	RetVal process_state(const RoboCompLidar3D::TPoints &data, const Corners &corners, const Match &match, AbstractGraphicViewer *viewer, const Door &door);
 
 	// draw
 	void draw_lidar(const auto &points, std::optional<Eigen::Vector2d> center_opt, QGraphicsScene *scene);

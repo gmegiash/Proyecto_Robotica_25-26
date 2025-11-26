@@ -122,6 +122,7 @@ void SpecificWorker::compute()
 {
 	auto data = read_data();
 	data = door_detector.filter_points(filter_isolated_points(data, 100), &viewer->scene);
+	auto door = door_detector.get_current_door().value();
 
 	// compute corners
 	const auto &[corners, lines] = room_detector.compute_corners(data);
@@ -150,7 +151,7 @@ void SpecificWorker::compute()
 
 
 	// Process state machine
-	RetVal ret_val = process_state(data, corners, match, viewer);
+	RetVal ret_val = process_state(data, corners, match, viewer, door);
 	auto [st, adv, rot] = ret_val;
 	state = st;
 
@@ -175,9 +176,23 @@ void SpecificWorker::compute()
 	last_time = std::chrono::high_resolution_clock::now();
 }
 
-SpecificWorker::RetVal SpecificWorker::goto_door(const RoboCompLidar3D::TPoints &points)
+SpecificWorker::RetVal SpecificWorker::goto_door(const RoboCompLidar3D::TPoints &points, const Door &door)
 {
+	const auto &room = nominal_rooms[0];
 
+	auto target_local = door.center();
+
+	// Usamos el umbral definido en los parametros
+	if (target_local.norm() < params.DOOR_REACHED_DIST)
+	{
+		qInfo() << "Llegada a la puerta (Distancia:" << target_local.norm() << "mm). Cambiando a CROSS_DOOR.";
+		// Paramos elrobot (0,0) y cambiamos de estado
+	   return {STATE::CROSS_DOOR, 0.f, 0.f};
+	}
+
+	auto [adv, rot] = robot_controller(target_local);
+
+	return {STATE::GOTO_DOOR, adv, rot};
 }
 
 SpecificWorker::RetVal SpecificWorker::turn(const Corners &corners)
@@ -186,7 +201,7 @@ SpecificWorker::RetVal SpecificWorker::turn(const Corners &corners)
 	if (detected)
 	{
 		localised = true;
-		return 	{STATE::IDLE, 0,0};
+		return 	{STATE::GOTO_DOOR, 0,0};
 	}
 
 	auto rot = params.RELOCAL_ROT_SPEED;
@@ -226,14 +241,15 @@ SpecificWorker::RetVal SpecificWorker::update_pose(const Corners &corners, const
 
 }
 
-SpecificWorker::RetVal SpecificWorker::process_state(const RoboCompLidar3D::TPoints &data, const Corners &corners, const Match &match, AbstractGraphicViewer *viewer)
+SpecificWorker::RetVal SpecificWorker::process_state(const RoboCompLidar3D::TPoints &data, const Corners &corners, const Match &match, AbstractGraphicViewer *viewer, const Door &door)
 {
 	switch(state) {
 		case STATE::IDLE:               return std::make_tuple(STATE::IDLE, 0, 0);
-		case STATE::GOTO_DOOR:          return goto_door(data);
-		case STATE::TURN:               return turn(corners);
-		case STATE::ORIENT_TO_DOOR:     return orient_to_door(data);
+
 		case STATE::GOTO_ROOM_CENTER:   return goto_room_center(data);
+		case STATE::TURN:               return turn(corners);
+		case STATE::GOTO_DOOR:          return goto_door(data, door);
+		case STATE::ORIENT_TO_DOOR:     return orient_to_door(data);
 		case STATE::CROSS_DOOR:         return cross_door(data);
 	}
 }
