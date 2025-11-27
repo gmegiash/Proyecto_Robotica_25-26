@@ -63,6 +63,7 @@ struct Door
         const float dir_norm = dir.norm();
         if (dir_norm == 0.f)
             return center(); // degenerate door, return center
+
         dir /= dir_norm;
         // perpendicular (normal) to door direction
         Eigen::Vector2f normal(-dir.y(), dir.x());

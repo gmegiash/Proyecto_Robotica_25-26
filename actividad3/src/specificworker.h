@@ -176,7 +176,7 @@ private:
 
 	RetVal goto_door(const RoboCompLidar3D::TPoints &points, const Door &door);
 	RetVal turn(const Corners &corners);
-	RetVal orient_to_door(const RoboCompLidar3D::TPoints &points);
+	RetVal orient_to_door(const RoboCompLidar3D::TPoints &points, const Door &door);
 	RetVal goto_room_center(const RoboCompLidar3D::TPoints &points);
 	RetVal cross_door(const RoboCompLidar3D::TPoints &points);
 	RetVal update_pose(const Corners &corners, const Match &match);

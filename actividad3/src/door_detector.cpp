@@ -107,12 +107,29 @@ RoboCompLidar3D::TPoints DoorDetector::filter_points(const RoboCompLidar3D::TPoi
         return (c.y() - a.y()) * (b.x() - a.x()) > (b.y() - a.y()) * (c.x() - a.x());
     };
 
+
+
+    for (const auto &door : doors)
+    {
+        double dx = door.p2.x() - door.p1.x();
+        double dy = door.p2.y() - door.p1.y();
+
+        auto midpoint = door.center();
+
+        double a = -dy;
+        double b = dx;
+
+        double C = -(a * midpoint.x() + b * midpoint.y());
+
+
+    }
+
     RoboCompLidar3D::TPoints filtered;
     for(const auto &point : points)
     {
         auto vector_point = Eigen::Vector2f(point.x,point.y);
 
-        Eigen::Vector2f robot_pos(0.f, 110.f);
+        Eigen::Vector2f robot_pos(0.f, -169.f);
 
         bool is_occluded = std::ranges::any_of(doors, [&](const auto &door) {
             return (ccw(door.p1, door.p2, robot_pos) != ccw(door.p1, door.p2, vector_point)) &&

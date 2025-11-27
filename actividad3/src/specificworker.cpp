@@ -121,13 +121,20 @@ void SpecificWorker::initialize()
 void SpecificWorker::compute()
 {
 	auto data = read_data();
-	data = door_detector.filter_points(filter_isolated_points(data, 100), &viewer->scene);
+
+	if (!door_detector.get_current_door().has_value())
+	{
+		qInfo() << "No door detected";
+		return;
+	}
 	auto door = door_detector.get_current_door().value();
+
 
 	// compute corners
 	const auto &[corners, lines] = room_detector.compute_corners(data);
 	estimated_center = center_estimator.estimate(data);
-	draw_lidar(door_detector.filter_points(data,&viewer->scene), estimated_center, &viewer->scene);
+	draw_lidar(data, estimated_center, &viewer->scene);
+	return;
 	// match corners  transforming first nominal corners to robot's frame
 	const auto match = hungarian.match(corners,
 											  nominal_rooms[0].transform_corners_to(robot_pose.inverse()));
@@ -167,6 +174,7 @@ void SpecificWorker::compute()
 	robot_room_draw->setRotation(angle);
 
 	// update GUI
+	label_state->setText(to_string(state));
 	time_series_plotter->update();
 	lcdNumber_adv->display(adv);
 	lcdNumber_rot->display(rot);
@@ -210,9 +218,21 @@ SpecificWorker::RetVal SpecificWorker::turn(const Corners &corners)
 	return 	{STATE::TURN, 0, rot};
 }
 
-SpecificWorker::RetVal SpecificWorker::orient_to_door(const RoboCompLidar3D::TPoints &points)
+SpecificWorker::RetVal SpecificWorker::orient_to_door(const RoboCompLidar3D::TPoints &points, const Door &door)
 {
+	auto centerDoor = door.center();
+	auto PoseRobot = robot_pose.translation().cast<float>();
+	auto v1 = centerDoor - PoseRobot;
+	auto v2 = door.p1 - door.p2;
+	auto angle_v1 = std::atan2(v1.y(), v1.x());
+	auto angle_v2 = std::atan2(v2.y(), v2.x());
+	auto angleRobot = angle_v2 - angle_v1;
 
+	auto adv = params.RELOCAL_MAX_ADV;
+	auto rot = params.RELOCAL_ROT_SPEED;
+	if (angleRobot < (std::numbers::pi/2))
+		return {STATE::CROSS_DOOR, adv, rot};
+	return {STATE::TURN, 0, rot};
 }
 
 SpecificWorker::RetVal SpecificWorker::goto_room_center(const RoboCompLidar3D::TPoints &points)
@@ -249,7 +269,7 @@ SpecificWorker::RetVal SpecificWorker::process_state(const RoboCompLidar3D::TPoi
 		case STATE::GOTO_ROOM_CENTER:   return goto_room_center(data);
 		case STATE::TURN:               return turn(corners);
 		case STATE::GOTO_DOOR:          return goto_door(data, door);
-		case STATE::ORIENT_TO_DOOR:     return orient_to_door(data);
+		case STATE::ORIENT_TO_DOOR:     return orient_to_door(data, door);
 		case STATE::CROSS_DOOR:         return cross_door(data);
 	}
 }
