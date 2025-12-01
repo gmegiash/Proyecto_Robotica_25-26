@@ -134,7 +134,6 @@ void SpecificWorker::compute()
 	const auto &[corners, lines] = room_detector.compute_corners(data);
 	estimated_center = center_estimator.estimate(data);
 	draw_lidar(data, estimated_center, &viewer->scene);
-	return;
 	// match corners  transforming first nominal corners to robot's frame
 	const auto match = hungarian.match(corners,
 											  nominal_rooms[0].transform_corners_to(robot_pose.inverse()));
@@ -158,7 +157,7 @@ void SpecificWorker::compute()
 
 
 	// Process state machine
-	RetVal ret_val = process_state(data, corners, match, viewer, door);
+	RetVal ret_val = process_state(data, door);
 	auto [st, adv, rot] = ret_val;
 	state = st;
 
@@ -186,24 +185,31 @@ void SpecificWorker::compute()
 
 SpecificWorker::RetVal SpecificWorker::goto_door(const RoboCompLidar3D::TPoints &points, const Door &door)
 {
-	const auto &room = nominal_rooms[0];
+	auto door_center = door.center();
 
-	auto target_local = door.center();
+	Eigen::Vector2f v = door.p2 - door.p1;
+
+	Eigen::Vector2f perp(-v.y(), v.x());
+	perp.normalize();
+
+	Eigen::Vector2f pA = door_center + perp * params.DOOR_REACHED_DIST;
+	Eigen::Vector2f pB = door_center - perp * params.DOOR_REACHED_DIST;
+
+	auto target_local = (pA.norm() < pB.norm()) ? pA : pB;
 
 	// Usamos el umbral definido en los parametros
-	if (target_local.norm() < params.DOOR_REACHED_DIST)
+	if (target_local.norm() < params.RELOCAL_CENTER_EPS)
 	{
-		qInfo() << "Llegada a la puerta (Distancia:" << target_local.norm() << "mm). Cambiando a CROSS_DOOR.";
+		qInfo() << "Llegada a la puerta (Distancia:" << door_center.norm() << "mm). Cambiando a CROSS_DOOR.";
 		// Paramos elrobot (0,0) y cambiamos de estado
-	   return {STATE::CROSS_DOOR, 0.f, 0.f};
+		return {STATE::ORIENT_TO_DOOR, 0.f, 0.f};
 	}
 
 	auto [adv, rot] = robot_controller(target_local);
-
 	return {STATE::GOTO_DOOR, adv, rot};
 }
 
-SpecificWorker::RetVal SpecificWorker::turn(const Corners &corners)
+SpecificWorker::RetVal SpecificWorker::turn()
 {
 	auto [detected,left_right] = rc::ImageProcessor::check_colour_patch_in_image(camera360rgb_proxy, "red");
 	if (detected)
@@ -220,19 +226,20 @@ SpecificWorker::RetVal SpecificWorker::turn(const Corners &corners)
 
 SpecificWorker::RetVal SpecificWorker::orient_to_door(const RoboCompLidar3D::TPoints &points, const Door &door)
 {
-	auto centerDoor = door.center();
-	auto PoseRobot = robot_pose.translation().cast<float>();
-	auto v1 = centerDoor - PoseRobot;
-	auto v2 = door.p1 - door.p2;
-	auto angle_v1 = std::atan2(v1.y(), v1.x());
-	auto angle_v2 = std::atan2(v2.y(), v2.x());
-	auto angleRobot = angle_v2 - angle_v1;
+	auto door_center = door.center();
 
-	auto adv = params.RELOCAL_MAX_ADV;
-	auto rot = params.RELOCAL_ROT_SPEED;
-	if (angleRobot < (std::numbers::pi/2))
-		return {STATE::CROSS_DOOR, adv, rot};
-	return {STATE::TURN, 0, rot};
+	float angle_to_door = std::atan2(door_center.y(), door_center.x());
+
+	if(angle_to_door < M_PI_2 + params.RELOCAL_DELTA && angle_to_door > M_PI_2 - params.RELOCAL_DELTA)
+	{
+		// Está mirando a la puerta -> Avanzar
+		return {STATE::CROSS_DOOR, 0, 0};
+	}
+
+	// No está orientado -> Girar hacia la puerta
+	auto [adv, rot] = robot_controller(door_center);
+
+	return {STATE::ORIENT_TO_DOOR, 0.0f, rot};
 }
 
 SpecificWorker::RetVal SpecificWorker::goto_room_center(const RoboCompLidar3D::TPoints &points)
@@ -251,9 +258,29 @@ SpecificWorker::RetVal SpecificWorker::goto_room_center(const RoboCompLidar3D::T
 	}
 }
 
-SpecificWorker::RetVal SpecificWorker::cross_door(const RoboCompLidar3D::TPoints &points)
+SpecificWorker::RetVal SpecificWorker::cross_door(const RoboCompLidar3D::TPoints &points, const Door &door)
 {
+	auto door_center = door.center();
 
+	Eigen::Vector2f v = door.p2 - door.p1;
+
+	Eigen::Vector2f perp(-v.y(), v.x());
+	perp.normalize();
+
+	Eigen::Vector2f pA = door_center + perp * params.DOOR_REACHED_DIST;
+	Eigen::Vector2f pB = door_center - perp * params.DOOR_REACHED_DIST;
+
+	auto target_local = pA.y() > pB.y() ? pA : pB;
+
+	// Usamos el umbral definido en los parametros
+	if (target_local.norm() < params.RELOCAL_CENTER_EPS)
+	{
+		// Paramos elrobot (0,0) y cambiamos de estado
+		return {STATE::GOTO_ROOM_CENTER, 0.f, 0.f};
+	}
+
+	auto [adv, rot] = robot_controller(target_local);
+	return {STATE::CROSS_DOOR, adv, rot};
 }
 
 SpecificWorker::RetVal SpecificWorker::update_pose(const Corners &corners, const Match &match)
@@ -261,16 +288,16 @@ SpecificWorker::RetVal SpecificWorker::update_pose(const Corners &corners, const
 
 }
 
-SpecificWorker::RetVal SpecificWorker::process_state(const RoboCompLidar3D::TPoints &data, const Corners &corners, const Match &match, AbstractGraphicViewer *viewer, const Door &door)
+SpecificWorker::RetVal SpecificWorker::process_state(const RoboCompLidar3D::TPoints &data, const Door &door)
 {
 	switch(state) {
-		case STATE::IDLE:               return std::make_tuple(STATE::IDLE, 0, 0);
+		case STATE::IDLE:               return {STATE::IDLE, 0, 0};
 
 		case STATE::GOTO_ROOM_CENTER:   return goto_room_center(data);
-		case STATE::TURN:               return turn(corners);
+		case STATE::TURN:               return turn();
 		case STATE::GOTO_DOOR:          return goto_door(data, door);
 		case STATE::ORIENT_TO_DOOR:     return orient_to_door(data, door);
-		case STATE::CROSS_DOOR:         return cross_door(data);
+		case STATE::CROSS_DOOR:         return cross_door(data, door);
 	}
 }
 
@@ -318,44 +345,6 @@ RoboCompLidar3D::TPoints SpecificWorker::read_data()
 	return door_detector.filter_points(data.points, &viewer->scene);
 }
 
-RoboCompLidar3D::TPoints SpecificWorker::filter_isolated_points(const RoboCompLidar3D::TPoints &points, float d) // set to 200mm
-{
-	if (points.empty()) return {};
-
-	const float d_squared = d * d;  // Avoid sqrt by comparing squared distances
-	std::vector<bool> hasNeighbor(points.size(), false);
-
-	// Create index vector for parallel iteration
-	std::vector<size_t> indices(points.size());
-	std::iota(indices.begin(), indices.end(), size_t{0});
-
-	// Parallelize outer loop - each thread checks one point
-	std::for_each(std::execution::par, indices.begin(), indices.end(), [&](size_t i)
-		{
-			const auto& p1 = points[i];
-			// Sequential inner loop (avoid nested parallelism)
-			for (auto &&[j,p2] : iter::enumerate(points))
-			{
-				if (i == j) continue;
-				const float dx = p1.x - p2.x;
-				const float dy = p1.y - p2.y;
-				if (dx * dx + dy * dy <= d_squared)
-				{
-					hasNeighbor[i] = true;
-					break;
-				}
-			}
-	});
-
-	// Collect results
-	std::vector<RoboCompLidar3D::TPoint> result;
-	result.reserve(points.size());
-	for (auto &&[i, p] : iter::enumerate(points))
-		if (hasNeighbor[i])
-			result.push_back(points[i]);
-	return result;
-}
-
 void SpecificWorker::print_match(const Match &match, const float error) const
 {
 	// Me gustaría ver dos tetas muy grandres
@@ -364,13 +353,28 @@ void SpecificWorker::print_match(const Match &match, const float error) const
 bool SpecificWorker::update_robot_pose(const Corners &corners, const Match &match)
 {
 	//Resolvemos la pose matematica
-	Eigen::Vector3d new_pose_params = solve_pose(corners, match);
+	Eigen::Vector3d inc_pose_params = solve_pose(corners, match);
 
-	//Actualizamos la variable robot_pose
-	//new_pose_params contiene (x, y, theta)
-	robot_pose.setIdentity();
-	robot_pose.translation() << new_pose_params.x(), new_pose_params.y();
-	robot_pose.linear() = Eigen::Rotation2Dd(new_pose_params.z()).toRotationMatrix();
+
+	// Construir transformación incremental
+	Eigen::Isometry2d Tinc = Eigen::Isometry2d::Identity();
+	Tinc.translate(Eigen::Vector2d(inc_pose_params.x(), inc_pose_params.y()));
+	Tinc.rotate(inc_pose_params.z());
+
+	// Componer pose global
+	robot_pose = robot_pose * Tinc;
+
+	static std::vector<QGraphicsItem*> draws;
+	for (const auto &p : draws)
+	{
+		viewer_room->scene.removeItem(p);
+		delete p;
+	}
+	draws.clear();
+
+	auto dp = viewer_room->scene.addRect(nominal_rooms[0].rect(), QPen(Qt::black, 30));
+	draws.push_back(dp);
+
 
 	return true;
 }
@@ -380,24 +384,26 @@ void SpecificWorker::move_robot(float adv, float rot, float max_match_error)
 	this->omnirobot_proxy->setSpeedBase(0, adv, rot);
 }
 
-Eigen::Vector3d SpecificWorker::solve_pose(const Corners &corners, const Match &match) {
+Eigen::Vector3d SpecificWorker::solve_pose(const Corners &corners, const Match &match)
+{
 	Eigen::MatrixXd W(corners.size() * 2, 3);
-	Eigen:: VectorXd b(corners.size() * 2);
+	Eigen::VectorXd b(corners.size() * 2);
 
-	for (auto &&[i, m]: match | iter::enumerate)
+	for (auto &&[i, m] : match | iter::enumerate)
 	{
 		auto &[meas_c, nom_c, distance] = m;
 		auto &[p_meas, __, ___] = meas_c;
 		auto &[p_nom, ____, _____] = nom_c;
-		b(2 * i) = p_nom.x() - p_meas.x();
-		b(2 * i + 1) = p_nom.y() - p_meas.y();
-		W.block<1, 3>(2 * i, 0) << 1.0, 0.0, -p_meas.y();
-		W.block<1, 3>(2 * i +1, 0) << 0.0, 1.0, p_meas.x();
 
-		// qInfo() << p_meas << p_nom << distance;
+		b(2*i)     = p_nom.x() - p_meas.x();
+		b(2*i + 1) = p_nom.y() - p_meas.y();
+
+		W.block<1,3>(2*i,     0) << 1.0, 0.0, -p_meas.y();
+		W.block<1,3>(2*i + 1, 0) << 0.0, 1.0,  p_meas.x();
 	}
-	qInfo() << "-----";
-	const Eigen::Vector3d r = (W.transpose() * W).inverse() * W.transpose() * b;
+
+	// Estimación robusta de mínimos cuadrados
+	Eigen::Vector3d r = W.colPivHouseholderQr().solve(b);
 
 	return r;
 }

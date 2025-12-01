@@ -107,36 +107,29 @@ RoboCompLidar3D::TPoints DoorDetector::filter_points(const RoboCompLidar3D::TPoi
         return (c.y() - a.y()) * (b.x() - a.x()) > (b.y() - a.y()) * (c.x() - a.x());
     };
 
+    auto is_occluded = [ccw](const Door &door, const Eigen::Vector2f vector_point, const Eigen::Vector2f robot_pos) {
+        return (ccw(door.p1, door.p2, robot_pos) != ccw(door.p1, door.p2, vector_point)) &&
+                   (ccw(door.p1, robot_pos, vector_point) != ccw(door.p2, robot_pos, vector_point));
+    };
 
-
-    for (const auto &door : doors)
-    {
-        double dx = door.p2.x() - door.p1.x();
-        double dy = door.p2.y() - door.p1.y();
-
-        auto midpoint = door.center();
-
-        double a = -dy;
-        double b = dx;
-
-        double C = -(a * midpoint.x() + b * midpoint.y());
-
-
-    }
+    auto any_is_occluded = [&](const Doors &doors, const Eigen::Vector2f vector_point, const Eigen::Vector2f robot_pos) {
+        return std::ranges::any_of(doors, [&](const Door &door) {
+            return is_occluded(door, vector_point, robot_pos);
+        });
+    };
 
     RoboCompLidar3D::TPoints filtered;
     for(const auto &point : points)
     {
         auto vector_point = Eigen::Vector2f(point.x,point.y);
 
-        Eigen::Vector2f robot_pos(0.f, -169.f);
+        Eigen::Vector2f robot_pos_front(0.f, 185.f);
+        Eigen::Vector2f robot_pos_back(0.f, -185.f);
 
-        bool is_occluded = std::ranges::any_of(doors, [&](const auto &door) {
-            return (ccw(door.p1, door.p2, robot_pos) != ccw(door.p1, door.p2, vector_point)) &&
-                   (ccw(door.p1, robot_pos, vector_point) != ccw(door.p2, robot_pos, vector_point));
-        });
+        if (any_is_occluded(doors, vector_point, robot_pos_front))    continue;
+        if (any_is_occluded(doors, vector_point, robot_pos_back))    continue;
 
-        if (!is_occluded) filtered.emplace_back(point);
+        filtered.emplace_back(point);
     }
     return filtered;
 }

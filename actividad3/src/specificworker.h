@@ -125,7 +125,7 @@ private:
 		float WALL_MIN_DISTANCE = ROBOT_WIDTH*1.2;
 		// match error correction
 		float MATCH_ERROR_SIGMA = 150.f; // mm
-		float DOOR_REACHED_DIST = 300.f;
+		float DOOR_REACHED_DIST = 500.f;
 		std::string LIDAR_NAME_LOW = "bpearl";
 		std::string LIDAR_NAME_HIGH = "helios";
 		QRectF GRID_MAX_DIM{-5000, 2500, 10000, -5000};
@@ -136,7 +136,7 @@ private:
 		float RELOCAL_MAX_ADV = 300.f;       // mm/s cap while re-centering
 		float RELOCAL_MAX_SIDE = 300.f;      // mm/s cap while re-centering
 		float RELOCAL_ROT_SPEED = 0.3f;     // rad/s while aligning
-		float RELOCAL_DELTA = 5.0f * M_PI/180.f; // small probe angle in radians
+		float RELOCAL_DELTA = 3.0f * M_PI/180.f; // small probe angle in radians
 		float RELOCAL_MATCH_MAX_DIST = 2000.f;   // mm for Hungarian gating
 		float RELOCAL_DONE_COST = 500.f;
 		float RELOCAL_DONE_MATCH_MAX_ERROR = 1000.f;
@@ -175,12 +175,12 @@ private:
 	using RetVal = std::tuple<STATE, float, float>;
 
 	RetVal goto_door(const RoboCompLidar3D::TPoints &points, const Door &door);
-	RetVal turn(const Corners &corners);
+	RetVal turn();
 	RetVal orient_to_door(const RoboCompLidar3D::TPoints &points, const Door &door);
 	RetVal goto_room_center(const RoboCompLidar3D::TPoints &points);
-	RetVal cross_door(const RoboCompLidar3D::TPoints &points);
+	RetVal cross_door(const RoboCompLidar3D::TPoints &points, const Door &door);
 	RetVal update_pose(const Corners &corners, const Match &match);
-	RetVal process_state(const RoboCompLidar3D::TPoints &data, const Corners &corners, const Match &match, AbstractGraphicViewer *viewer, const Door &door);
+	RetVal process_state(const RoboCompLidar3D::TPoints &data, const Door &door);
 
 	// draw
 	void draw_lidar(const auto &points, std::optional<Eigen::Vector2d> center_opt, QGraphicsScene *scene);
@@ -188,9 +188,6 @@ private:
 
 	// aux
 	RoboCompLidar3D::TPoints read_data();
-	std::expected<int, std::string> closest_lidar_index_to_given_angle(const auto &points, float angle);
-	RoboCompLidar3D::TPoints filter_same_phi(const RoboCompLidar3D::TPoints &points);
-	RoboCompLidar3D::TPoints filter_isolated_points(const RoboCompLidar3D::TPoints &points, float d);
 	void print_match(const Match &match, const float error =1.f) const;
 
 	// DoubleBuffer for velocity commands
@@ -213,6 +210,7 @@ private:
 	// relocalization
 	bool relocal_centered = false;
 	bool localised = false;
+
 
 	bool update_robot_pose(const Corners &corners, const Match &match);
 	void move_robot(float adv, float rot, float max_match_error);
