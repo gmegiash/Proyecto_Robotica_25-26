@@ -125,7 +125,7 @@ private:
 		float WALL_MIN_DISTANCE = ROBOT_WIDTH*1.2;
 		// match error correction
 		float MATCH_ERROR_SIGMA = 150.f; // mm
-		float DOOR_REACHED_DIST = 500.f;
+		float DOOR_REACHED_DIST = 750.f;
 		std::string LIDAR_NAME_LOW = "bpearl";
 		std::string LIDAR_NAME_HIGH = "helios";
 		QRectF GRID_MAX_DIM{-5000, 2500, 10000, -5000};
@@ -171,7 +171,7 @@ private:
 			default:                        return "UNKNOWN";
 		}
 	}
-	STATE state = STATE::GOTO_ROOM_CENTER;
+	STATE state = STATE::IDLE;
 	using RetVal = std::tuple<STATE, float, float>;
 
 	RetVal goto_door(const RoboCompLidar3D::TPoints &points, const Door &door);
@@ -185,6 +185,7 @@ private:
 	// draw
 	void draw_lidar(const auto &points, std::optional<Eigen::Vector2d> center_opt, QGraphicsScene *scene);
 	void update_robot_position();
+	void draw_current_room(const NominalRoom &room, QGraphicsScene *scene);
 
 	// aux
 	RoboCompLidar3D::TPoints read_data();
@@ -211,9 +212,12 @@ private:
 	bool relocal_centered = false;
 	bool localised = false;
 
+	float compute_match_error(const Match &match);
+	std::tuple<NominalRoom, Match, float> compute_match(const Corners &corners);
+
 
 	bool update_robot_pose(const Corners &corners, const Match &match);
-	void move_robot(float adv, float rot, float max_match_error);
+	void move_robot(float adv, float rot);
 	Eigen::Vector3d solve_pose(const Corners &corners, const Match &match);
 	void predict_robot_pose();
 	std::tuple<float, float> robot_controller(const Eigen::Vector2f &target);

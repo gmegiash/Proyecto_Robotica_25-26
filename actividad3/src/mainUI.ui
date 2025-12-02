@@ -202,7 +202,7 @@
          <item>
           <widget class="QPushButton" name="pushButton_stop">
            <property name="text">
-            <string>Stop</string>
+            <string>Start</string>
            </property>
            <property name="checkable">
             <bool>true</bool>
@@ -225,6 +225,26 @@
          <property name="frameShadow">
           <enum>QFrame::Raised</enum>
          </property>
+         <layout class="QVBoxLayout" name="verticalLayout_3">
+          <item>
+           <layout class="QHBoxLayout" name="horizontalLayout_10">
+            <item>
+             <widget class="QLabel" name="label_localised_name">
+              <property name="text">
+               <string>Localised</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="label_localised">
+              <property name="text">
+               <string>TextLabel</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+         </layout>
         </widget>
        </item>
       </layout>

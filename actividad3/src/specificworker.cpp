@@ -88,8 +88,6 @@ void SpecificWorker::initialize()
 		viewer_room = new AbstractGraphicViewer(this->frame_room, params.GRID_MAX_DIM);
 		auto [rr, re] = viewer_room->add_robot(params.ROBOT_WIDTH, params.ROBOT_LENGTH, 0, 100, QColor("Blue"));
 		robot_room_draw = rr;
-		// draw room in viewer_room
-		viewer_room->scene.addRect(nominal_rooms[0].rect(), QPen(Qt::black, 30));
 		//viewer_room->show();
 		show();
 
@@ -112,14 +110,15 @@ void SpecificWorker::initialize()
 
 
 		// stop robot
-		move_robot(0, 0, 0);
+		move_robot(0, 0);
+
+		connect(pushButton_stop, &QPushButton::clicked, this, &SpecificWorker::doStartStop);
 	}
 }
 
 
 
-void SpecificWorker::compute()
-{
+void SpecificWorker::compute() {
 	auto data = read_data();
 
 	if (!door_detector.get_current_door().has_value())
@@ -129,31 +128,26 @@ void SpecificWorker::compute()
 	}
 	auto door = door_detector.get_current_door().value();
 
+	estimated_center = center_estimator.estimate(data);
 
 	// compute corners
 	const auto &[corners, lines] = room_detector.compute_corners(data);
-	estimated_center = center_estimator.estimate(data);
 	draw_lidar(data, estimated_center, &viewer->scene);
-	// match corners  transforming first nominal corners to robot's frame
-	const auto match = hungarian.match(corners,
-											  nominal_rooms[0].transform_corners_to(robot_pose.inverse()));
 
+	auto [nominal_room, match, max_match_error] = compute_match(corners);
 
-	// compute max of  match error
-	float max_match_error = 99999.f;
-	if (not match.empty())
-	{
-		const auto max_error_iter = std::ranges::max_element(match, [](const auto &a, const auto &b)
-			{ return std::get<2>(a) < std::get<2>(b); });
-		max_match_error = static_cast<float>(std::get<2>(*max_error_iter));
-		time_series_plotter->addDataPoint(match_error_graph,max_match_error);
-		//print_match(match, max_match_error); //debugging
-	}
-
+	time_series_plotter->addDataPoint(match_error_graph,max_match_error);
 
 	// update robot pose
 	if (localised)
+	{
+		label_localised->setText("True");
+		draw_current_room(nominal_room, &viewer_room->scene);
 		update_robot_pose(corners, match);
+	}
+	else
+		label_localised->setText("False");
+
 
 
 	// Process state machine
@@ -162,9 +156,9 @@ void SpecificWorker::compute()
 	state = st;
 
 
-	// Send movements commands to the robot constrained by the match_error
+	// Send movements commands to the robot
 	//qInfo() << __FUNCTION__ << "Adv: " << adv << " Rot: " << rot;
-	move_robot(adv, rot, max_match_error);
+	move_robot(adv, rot);
 
 
 	// draw robot in viewer
@@ -262,6 +256,11 @@ SpecificWorker::RetVal SpecificWorker::cross_door(const RoboCompLidar3D::TPoints
 {
 	auto door_center = door.center();
 
+	// initialise robot pose
+	localised = false;
+	robot_pose.setIdentity();
+	robot_pose.translate(Eigen::Vector2d(0.0,0.0));
+
 	Eigen::Vector2f v = door.p2 - door.p1;
 
 	Eigen::Vector2f perp(-v.y(), v.x());
@@ -298,6 +297,7 @@ SpecificWorker::RetVal SpecificWorker::process_state(const RoboCompLidar3D::TPoi
 		case STATE::GOTO_DOOR:          return goto_door(data, door);
 		case STATE::ORIENT_TO_DOOR:     return orient_to_door(data, door);
 		case STATE::CROSS_DOOR:         return cross_door(data, door);
+		default:						return {STATE::IDLE, 0, 0};
 	}
 }
 
@@ -338,6 +338,20 @@ void SpecificWorker::update_robot_position()
 	catch (const Ice::Exception &e){std::cout << e.what() << std::endl;}
 }
 
+void SpecificWorker::draw_current_room(const NominalRoom &room, QGraphicsScene *scene)
+{
+	static std::vector<QGraphicsItem*> draw_points;
+	for (const auto &p : draw_points) {
+		scene->removeItem(p);
+		delete p;
+	}
+	draw_points.clear();
+
+	// draw room in viewer_room
+	auto dp = viewer_room->scene.addRect(room.rect(), QPen(Qt::black, 30));
+	draw_points.push_back(dp);
+}
+
 RoboCompLidar3D::TPoints SpecificWorker::read_data()
 {
 	auto data = lidar3d_proxy->getLidarDataWithThreshold2d("helios", 12000, 1);
@@ -347,7 +361,38 @@ RoboCompLidar3D::TPoints SpecificWorker::read_data()
 
 void SpecificWorker::print_match(const Match &match, const float error) const
 {
-	// Me gustaría ver dos tetas muy grandres
+
+}
+
+float SpecificWorker::compute_match_error(const Match &match)
+{
+	if (match.empty())
+		return std::numeric_limits<float>::infinity();
+
+	double sum = std::transform_reduce(
+		match.begin(), match.end(),
+		0.0,
+		std::plus<double>{},        // reduce
+		[](const auto &m){          // transform
+			return std::get<2>(m);
+		}
+	);
+
+	return sum / match.size();
+}
+
+std::tuple<NominalRoom, Match, float> SpecificWorker::compute_match(const Corners &corners)
+{
+	std::vector<std::tuple<NominalRoom, Match, float>> matches;
+	for (const auto &nominal_room : nominal_rooms) {
+		auto match = hungarian.match(corners, nominal_room.transform_corners_to(robot_pose.inverse()));
+		matches.push_back({nominal_room,
+			match,
+			compute_match_error(match)});
+	}
+	auto it = std::ranges::min_element(matches, {}, [](auto &t){ return std::get<2>(t); });
+
+	return *it;
 }
 
 bool SpecificWorker::update_robot_pose(const Corners &corners, const Match &match)
@@ -364,22 +409,10 @@ bool SpecificWorker::update_robot_pose(const Corners &corners, const Match &matc
 	// Componer pose global
 	robot_pose = robot_pose * Tinc;
 
-	static std::vector<QGraphicsItem*> draws;
-	for (const auto &p : draws)
-	{
-		viewer_room->scene.removeItem(p);
-		delete p;
-	}
-	draws.clear();
-
-	auto dp = viewer_room->scene.addRect(nominal_rooms[0].rect(), QPen(Qt::black, 30));
-	draws.push_back(dp);
-
-
 	return true;
 }
 
-void SpecificWorker::move_robot(float adv, float rot, float max_match_error)
+void SpecificWorker::move_robot(float adv, float rot)
 {
 	this->omnirobot_proxy->setSpeedBase(0, adv, rot);
 }
@@ -472,12 +505,25 @@ void SpecificWorker::doStartStop()
 {
 	if (state == STATE::IDLE)
 	{
+		// Reiniciar pose
+		localised = false;
+		robot_pose.setIdentity();
+		robot_pose.translate(Eigen::Vector2d(0.0, 0.0));
+
+		state = STATE::GOTO_ROOM_CENTER;
+
+		pushButton_stop->setText("Stop");
+		qInfo() << "Robot iniciado. Estado: GOTO_ROOM_CENTER"; // Log para depurar
 		return;
 	}
 
+	// Caso contrario: Detener
+	pushButton_stop->setText("Start");
 	state = STATE::IDLE;
-}
 
+	move_robot(0, 0);
+	qInfo() << "Robot detenido. Estado: IDLE";
+}
 
 
 
