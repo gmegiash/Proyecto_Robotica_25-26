@@ -131,7 +131,7 @@ void SpecificWorker::compute() {
 	estimated_center = center_estimator.estimate(data);
 
 	// compute corners
-	const auto &[corners, lines] = room_detector.compute_corners(data);
+	const auto &[corners, lines] = room_detector.compute_corners(data, &viewer->scene);
 	draw_lidar(data, estimated_center, &viewer->scene);
 
 	auto [nominal_room, match, max_match_error] = compute_match(corners);
@@ -350,6 +350,9 @@ void SpecificWorker::draw_current_room(const NominalRoom &room, QGraphicsScene *
 	// draw room in viewer_room
 	auto dp = viewer_room->scene.addRect(room.rect(), QPen(Qt::black, 30));
 	draw_points.push_back(dp);
+
+	auto puertas = door_detector.doors();
+
 }
 
 RoboCompLidar3D::TPoints SpecificWorker::read_data()
