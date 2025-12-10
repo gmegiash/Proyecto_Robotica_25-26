@@ -10,6 +10,9 @@
 #include <Eigen/Dense>
 #include <boost/circular_buffer.hpp>
 #include <QLineF>
+#include <ranges>
+#include <cppitertools/enumerate.hpp>
+#include <cppitertools/sliding_window.hpp>
 #include <Eigen/src/Geometry/ParametrizedLine.h>
 
 
@@ -53,6 +56,35 @@ using Wall = std::tuple<Eigen::ParametrizedLine<float, 2>, int, Corner, Corner>;
 struct Walls
 {
     std::vector<Wall> walls;
+
+    Wall point_to_wall(const Eigen::Vector2f &p)
+    {
+        const auto walls_ = Walls();
+        auto m = std::ranges::min_element(walls.begin(),walls.end(), [&p](const auto &v1, const auto &v2)
+        {
+            const auto &line_a = std::get<0>(v1);
+            const auto &line_b = std::get<0>(v2);
+            return line_a.squaredDistance(p) < line_b.squaredDistance(p);
+        });
+        return *m;
+    }
+
+    Walls get_walls(Corners cs)
+    {
+        cs.push_back(cs[0]);
+        for (const auto &[i,c]: cs | iter::sliding_window(2) | iter::enumerate)
+        {
+            const auto &c1_QPoint = get<0>(c[0]);
+            const auto &c2_QPoint = get<0>(c[1]);
+
+            const auto &c1 = Eigen::Vector2f(c1_QPoint.x(), c1_QPoint.y());
+            const auto &c2 = Eigen::Vector2f(c2_QPoint.x(), c2_QPoint.y());
+
+            const auto r = Eigen::ParametrizedLine<float, 2>::Through(c1, c2);
+
+            //walls.emplace_back(r, i, c1, c2); HAY QUE ARRELGARLO
+        }
+    }
 };
 
 struct Door
