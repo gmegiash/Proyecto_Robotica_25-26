@@ -35,6 +35,8 @@ SET (SOURCES
   $ENV{ROBOCOMP}/classes/ConfigLoader/ConfigLoader.cpp
   main.cpp
   genericworker.cpp
+        ../src/walls_detector.cpp
+        ../src/walls_detector.h
 )
 
 
