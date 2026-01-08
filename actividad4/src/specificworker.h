@@ -49,7 +49,7 @@
 #include "image_processor.h"
 #include <expected>
 #include "pointcloud_center_estimator.h"
-
+#include "door_crossing_tracker.h"
 /**
  * \brief Class SpecificWorker implements the core functionality of the component.
  */
@@ -148,7 +148,7 @@ private:
 	QGraphicsPolygonItem *robot_draw, *robot_room_draw;
 
 	// robot
-	Eigen::Affine2d robot_pose;
+	Eigen::Affine2f robot_pose;
 
 	// rooms
 	std::vector<NominalRoom> nominal_rooms{ NominalRoom{5500.f, 4000.f}, NominalRoom{8000.f, 4000.f}};
@@ -158,7 +158,7 @@ private:
 	std::optional<Eigen::Vector2d> estimated_center;
 
 	// state machine
-	enum class STATE {GOTO_DOOR, ORIENT_TO_DOOR, GOTO_ROOM_CENTER, TURN, IDLE, CROSS_DOOR};
+	enum class STATE {GOTO_DOOR, ORIENT_TO_DOOR, GOTO_ROOM_CENTER, TURN, IDLE, CROSS_DOOR, LOCALISE};
 	inline const char* to_string(const STATE s) const
 	{
 		switch(s) {
@@ -168,6 +168,7 @@ private:
 			case STATE::ORIENT_TO_DOOR:     return "ORIENT_TO_DOOR";
 			case STATE::GOTO_ROOM_CENTER:   return "GOTO_ROOM_CENTER";
 			case STATE::CROSS_DOOR:         return "CROSS_DOOR";
+			case STATE::LOCALISE:			return "LOCALISE";
 			default:                        return "UNKNOWN";
 		}
 	}
@@ -180,6 +181,7 @@ private:
 	RetVal goto_room_center(const RoboCompLidar3D::TPoints &points);
 	RetVal cross_door(const RoboCompLidar3D::TPoints &points, const Door &door);
 	RetVal update_pose(const Corners &corners, const Match &match);
+	RetVal localise(const RoboCompLidar3D::TPoints &points, QGraphicsScene *scene);
 	RetVal process_state(const RoboCompLidar3D::TPoints &data, const Door &door);
 
 	// draw
@@ -208,15 +210,22 @@ private:
 	// timing
 	std::chrono::time_point<std::chrono::high_resolution_clock> last_time = std::chrono::high_resolution_clock::now();
 
+	int current_room = -1;
+	int current_door = -1;
+
 	// relocalization
 	bool relocal_centered = false;
 	bool localised = false;
+
+	//new door crossing detector
+	DoorCrossing door_crossing; //used the file in beta-robotica-class
+
 
 	float compute_match_error(const Match &match);
 	std::tuple<NominalRoom, Match, float> compute_match(const Corners &corners);
 
 
-	bool update_robot_pose(const Corners &corners, const Match &match);
+	std::optional<std::pair<Eigen::Affine2f, float>> update_robot_pose(int room_index, const Corners &corners, bool transform_corners);
 	void move_robot(float adv, float rot);
 	Eigen::Vector3d solve_pose(const Corners &corners, const Match &match);
 	void predict_robot_pose();

@@ -10,9 +10,6 @@
 #include <Eigen/Dense>
 #include <boost/circular_buffer.hpp>
 #include <QLineF>
-#include <ranges>
-#include <cppitertools/enumerate.hpp>
-#include <cppitertools/sliding_window.hpp>
 #include <Eigen/src/Geometry/ParametrizedLine.h>
 
 
@@ -51,39 +48,19 @@ using Features = std::tuple<Lines, Par_lines, Corners, All_Corners>;
 using Center = std::pair<QPointF, int>;  // center of a polygon and number of votes
 using Match = std::vector<std::tuple<Corner, Corner, double>>;  //  measurement - nominal - error Both must be in the same reference system
 using Peaks = std::vector<std::tuple<Eigen::Vector2f, float>>; // 2D points representing peaks with angle wrt robot frame
-
 struct Door
 {
     Eigen::Vector2f p1;
     float p1_angle;
     Eigen::Vector2f p2;
     float p2_angle;
-    [[nodiscard]] float width() const { return (p2 - p1).norm(); }
-    [[nodiscard]] Eigen::Vector2f center() const { return 0.5f * (p1 + p2); }
-    [[nodiscard]] Eigen::Vector2f center_before(const Eigen::Vector2d &robot_pos, float offset = 500.f) const   // a point 500mm before the center along the door direction
-    {
-        // computer the normal to the door direction pointing towards the robot
-        Eigen::Vector2f dir = p2 - p1;
-        const float dir_norm = dir.norm();
-        if (dir_norm == 0.f)
-            return center(); // degenerate door, return center
+    Eigen::Vector2f p1_global, p2_global;
+    bool visited = false;
+    int connects_to_room = -1; // index of the room this door connects to
+    int connects_to_door = -1; // index of the door in the connected room
+    Eigen::Affine2f door_pose_in_room; // door pose in the room frame Y+ points into the room
 
-        dir /= dir_norm;
-        // perpendicular (normal) to door direction
-        Eigen::Vector2f normal(-dir.y(), dir.x());
-        // choose the normal that points toward the robot
-        const Eigen::Vector2f to_robot = robot_pos.cast<float>() - center();
-        if (to_robot.dot(normal) < 0.f)
-            normal = -normal;
-        Eigen::Vector2f before = center() + offset * normal;
-        return before;
-    }
-    [[nodiscard]] float direction() const
-    {
-        Eigen::Vector2f dir = p2 - p1;
-        return std::atan2(dir.y(), dir.x());
-    }
-
+    Door() = default;
     Door(Eigen::Vector2f point1, const float angle1, Eigen::Vector2f point2, const float angle2)
     {
         // Calculate angular difference both ways
@@ -105,8 +82,35 @@ struct Door
             p2 = point1; p2_angle = angle1;
         }
     }
+    [[nodiscard]] float width() const { return (p2 - p1).norm(); }
+    [[nodiscard]] Eigen::Vector2f center() const { return 0.5f * (p1 + p2); }
+    [[nodiscard]] float center_angle() const { const auto c=center(); return atan2(c.x(),c.y()); }
+    [[nodiscard]] Eigen::Vector2f center_global() const { return 0.5f * (p1_global + p2_global); }
+    [[nodiscard]] Eigen::Vector2f center_before(const Eigen::Vector2f &robot_pos, float offset = 500.f) const   // a point 500mm before the center along the door direction
+    {
+        // computer the normal to the door direction pointing towards the robot
+        Eigen::Vector2f dir = p2 - p1;
+        const float dir_norm = dir.norm();
+        if (dir_norm == 0.f)
+            return center(); // degenerate door, return center
+        dir /= dir_norm;
+        // perpendicular (normal) to door direction
+        Eigen::Vector2f normal(-dir.y(), dir.x());
+        // choose the normal that points toward the robot
+        const Eigen::Vector2f to_robot = robot_pos.cast<float>() - center();
+        if (to_robot.dot(normal) < 0.f)
+            normal = -normal;
+        Eigen::Vector2f before = center() + offset * normal;
+        return before;
+    }
+    [[nodiscard]] float direction() const
+    {
+        Eigen::Vector2f dir = p2 - p1;
+        return std::atan2(dir.y(), dir.x());
+    }
 };
 using Doors = std::vector<Door>;
+using Wall = std::tuple<Eigen::ParametrizedLine<float, 2>, int, Corner, Corner>; // lines in general form ax + by + c = 0
+using Walls = std::vector<Wall>;
 
-using Wall = std::tuple<int, Eigen::ParametrizedLine<float, 2>, Doors, Corners>;
 #endif //COMMON_TYPES_H
