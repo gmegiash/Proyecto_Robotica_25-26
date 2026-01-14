@@ -61,31 +61,22 @@ RoboCompLidar3D::TPoints DoorDetector::filter_points(const RoboCompLidar3D::TPoi
     const auto doors = detect(points);
     if(doors.empty()) return points;
 
-    auto ccw = [](Eigen::Vector2f a, Eigen::Vector2f b, Eigen::Vector2f c) {
-        return (c.y() - a.y()) * (b.x() - a.x()) > (b.y() - a.y()) * (c.x() - a.x());
-    };
+    const Eigen::Vector2f robot_front(0.f, 185.f);
+    const Eigen::Vector2f robot_back(0.f, -185.f);
 
-    auto is_occluded = [ccw](const Door &door, const Eigen::Vector2f vector_point, const Eigen::Vector2f robot_pos) {
-        return (ccw(door.p1, door.p2, robot_pos) != ccw(door.p1, door.p2, vector_point)) &&
-                   (ccw(door.p1, robot_pos, vector_point) != ccw(door.p2, robot_pos, vector_point));
-    };
-
-    auto any_is_occluded = [&](const Doors &doors, const Eigen::Vector2f vector_point, const Eigen::Vector2f robot_pos) {
+    auto is_blocked = [&](const Eigen::Vector2f &target, const Eigen::Vector2f &origin) {
         return std::ranges::any_of(doors, [&](const Door &door) {
-            return is_occluded(door, vector_point, robot_pos);
+            return segment_intersects_door(door, origin, target);
         });
     };
 
     RoboCompLidar3D::TPoints filtered;
     for(const auto &point : points)
     {
-        auto vector_point = Eigen::Vector2f(point.x,point.y);
+        auto target = Eigen::Vector2f(point.x,point.y);
 
-        Eigen::Vector2f robot_pos_front(0.f, 185.f);
-        Eigen::Vector2f robot_pos_back(0.f, -185.f);
-
-        if (any_is_occluded(doors, vector_point, robot_pos_front))    continue;
-        if (any_is_occluded(doors, vector_point, robot_pos_back))    continue;
+        if (is_blocked(target, robot_front)) continue;
+        if (is_blocked(target, robot_back))  continue;
 
         filtered.emplace_back(point);
     }
@@ -97,4 +88,19 @@ std::expected<Door, std::string> DoorDetector::get_current_door() const
     if (doors_cache.empty())
         return std::unexpected<std::string>{"No doors detected"};
     return doors_cache[0];
+}
+
+bool DoorDetector::is_ccw(const Eigen::Vector2f &a, const Eigen::Vector2f &b, const Eigen::Vector2f &c)
+{
+    return (c.y() - a.y()) * (b.x() - a.x()) > (b.y() - a.y()) * (c.x() - a.x());
+}
+
+bool DoorDetector::segment_intersects_door(const Door &door, const Eigen::Vector2f &start, const Eigen::Vector2f &end)
+{
+    // Un segmento (start->end) cruza la puerta si:
+    // 1. Los puntos start y end están en lados opuestos de la línea de la puerta.
+    // 2. Los puntos de la puerta (p1, p2) están en lados opuestos del segmento start->end.
+
+    return (is_ccw(door.p1, door.p2, start) != is_ccw(door.p1, door.p2, end)) &&
+           (is_ccw(door.p1, start, end)     != is_ccw(door.p2, start, end));
 }

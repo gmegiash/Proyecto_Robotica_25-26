@@ -140,6 +140,8 @@ private:
 		float RELOCAL_MATCH_MAX_DIST = 2000.f;   // mm for Hungarian gating
 		float RELOCAL_DONE_COST = 500.f;
 		float RELOCAL_DONE_MATCH_MAX_ERROR = 1000.f;
+		float RELOCAL_MAX_ORIENTED_ERROR = 0.1f; // ~5 grados, error permitido para encarar la puerta
+		const int DIST_TARGET_BEFORE_DOOR = 500;
 	};
 	Params params;
 
@@ -223,6 +225,8 @@ private:
 
 	float compute_match_error(const Match &match);
 	std::tuple<NominalRoom, Match, float> compute_match(const Corners &corners);
+
+	int choose_next_door(int room_idx) const;
 
 
 	std::optional<std::pair<Eigen::Affine2f, float>> update_robot_pose(int room_index, const Corners &corners, bool transform_corners);

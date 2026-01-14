@@ -182,60 +182,230 @@ void SpecificWorker::compute() {
 
 SpecificWorker::RetVal SpecificWorker::goto_door(const RoboCompLidar3D::TPoints &points, const Door &door)
 {
-	auto door_center = door.center();
+	static auto last_valid_time = std::chrono::steady_clock::now();
+	static float last_adv = 0.0f;
+	static float last_rot = 0.0f;
+	const int BLIND_THREASHOLD_MS = 2000; //2 segundos de persistencia
 
-	Eigen::Vector2f v = door.p2 - door.p1;
+	QGraphicsScene *scene = &viewer->scene;
 
-	Eigen::Vector2f perp(-v.y(), v.x());
-	perp.normalize();
+	Doors doors;
 
-	Eigen::Vector2f pA = door_center + perp * params.DOOR_REACHED_DIST;
-	Eigen::Vector2f pB = door_center - perp * params.DOOR_REACHED_DIST;
+	if ((doors = door_detector.doors()).empty()) {
+		//Calculamos cuanto tiempo hace que perdimos la puerta
+		auto now = std::chrono::steady_clock::now();
+		auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_valid_time).count();
 
-	auto target_local = (pA.norm() < pB.norm()) ? pA : pB;
-
-	// Usamos el umbral definido en los parametros
-	if (target_local.norm() < params.RELOCAL_CENTER_EPS)
-	{
-		qInfo() << "Llegada a la puerta (Distancia:" << door_center.norm() << "mm). Cambiando a CROSS_DOOR.";
-		// Paramos elrobot (0,0) y cambiamos de estado
-		return {STATE::ORIENT_TO_DOOR, 0.f, 0.f};
+		if (elapsed_ms < BLIND_THREASHOLD_MS) {
+			//Seguimos con la ultima velocidad conocida
+			return {STATE::GOTO_DOOR, last_adv, last_rot};
+		}
+		else {
+			//Se acaba el tiempo, paramos
+			qInfo() << __FUNCTION__ << "No detecto puerta desde hace " << elapsed_ms << "ms. Parando. ";
+			return {STATE::GOTO_DOOR, 0.f, 0.f};
+		}
 	}
 
-	auto [adv, rot] = robot_controller(target_local);
+	//Hemos visto puertas -> Reseteamos el temporizados
+	last_valid_time = std::chrono::steady_clock::now();
+
+	//Seleccion de la mejor puerta
+	Door target_door;
+	if (localised && current_room != -1 && current_door != -1){
+		//Si esta localizado, buscamos la que coincide con la puerta nominal del mapa
+		const auto dn = nominal_rooms[current_room].doors[current_door];
+		const auto sd = std::ranges::min_element(doors, [dn, this](const auto &a, const auto &b)
+			{ return (a.center() - robot_pose.inverse() * dn.center_global()).norm() < (b.center() - robot_pose.inverse() * dn.center_global()).norm(); });
+		target_door = *sd;
+	}
+	else {
+		//Si no esta localizado, cogemos la que terngamos mas enfrente
+		const auto sd = std::ranges::min_element(doors, [](const auto &a, const auto &b)
+			{ return abs(a.p1_angle) < abs(b.p1_angle); });
+		target_door = *sd;
+	}
+
+	//calculamos el punto objetivo antes de cruzar la puerta
+	const auto target = target_door.center_before(robot_pose.translation(), params.DIST_TARGET_BEFORE_DOOR);
+	const auto dist_to_door = target.norm();
+
+	static QGraphicsItem *door_target_draw = nullptr;
+	if (door_target_draw != nullptr)
+		scene->removeItem(door_target_draw);
+
+	door_target_draw = scene->addEllipse(-50, -50, 100, 100, QPen(Qt::magenta), QBrush(Qt::magenta));
+	door_target_draw->setPos(target.x(), target.y());
+
+	//Condicion de exito
+	if (dist_to_door < params.DOOR_REACHED_DIST) {
+		last_adv = 0;
+		last_rot = 0;
+		return{STATE::ORIENT_TO_DOOR, 0.f, 0.f};
+	}
+
+	//Controlador
+	const auto &[adv, rot] = robot_controller(target);
+
+	last_adv = adv;
+	last_rot = rot;
+
 	return {STATE::GOTO_DOOR, adv, rot};
 }
 
 SpecificWorker::RetVal SpecificWorker::turn()
 {
-	auto [detected,room_index, left_right] = rc::ImageProcessor::check_colour_patch_in_image(camera360rgb_proxy);
+	auto [detected,room_idx, left_right] = rc::ImageProcessor::check_colour_patch_in_image(camera360rgb_proxy);
 	if (detected)
 	{
+		current_room = room_idx;
 		localised = true;
-		return 	{STATE::GOTO_DOOR, 0,0};
+
+		if (!nominal_rooms[current_room].visited)
+		{
+			qInfo() << "Habitación " << current_room << " visitada por primera vez. Guardando puertas.";
+			nominal_rooms[current_room].visited = true;
+
+			auto detected_doors = door_detector.doors();
+			nominal_rooms[current_room].doors.clear(); // Limpiamos para llenar con datos reales
+
+			// Transformamos las puertas detectadas (locales) a globales y las guardamos
+			for(const auto &d : detected_doors)
+			{
+				// Convertir p1 y p2 a coordenadas globales usando la pose actual del robot
+				Eigen::Vector2f p1_g = robot_pose * d.p1;
+				Eigen::Vector2f p2_g = robot_pose * d.p2;
+
+				// Guardamos una nueva puerta "Nominal" en el mapa
+				Door global_door;
+				global_door.p1 = p1_g;
+				global_door.p2 = p2_g;
+				nominal_rooms[current_room].doors.push_back(global_door);
+			}
+		}
+
+		if (door_crossing.valid)
+		{
+			// Recuperamos índices de donde veníamos
+			int prev_room_idx = door_crossing.leaving_room_index;
+			int prev_door_idx = door_crossing.leaving_door_index;
+			int curr_door_idx = door_crossing.entering_door_index;
+
+			// Actualizamos el grafo: La puerta de atrás conecta con la de aquí
+			nominal_rooms[prev_room_idx].doors[prev_door_idx].connects_to_room = current_room;
+			nominal_rooms[current_room].doors[curr_door_idx].connects_to_room = prev_room_idx;
+
+			qInfo() << "CONEXIÓN REALIZADA: Room " << prev_room_idx << " <--> Room " << current_room;
+
+			door_crossing.valid = false; // Ya hemos consumido el evento de cruce
+		}
+
+		current_door = choose_next_door(current_room);
+
+		if (current_door != -1)
+			return {STATE::GOTO_DOOR, 0, 0};
+
+		return {STATE::IDLE, 0, 0};
+
 	}
 
-	auto rot = params.RELOCAL_ROT_SPEED;
-	if (left_right == -1)	rot = -rot;
+	float rot = params.RELOCAL_ROT_SPEED;
+	if (left_right == -1) rot = -rot; // Girar hacia la izquierda si la pista lo indica
 
-	return 	{STATE::TURN, 0, rot};
+	return {STATE::TURN, 0, rot};
+}
+
+int SpecificWorker::choose_next_door(int room_idx) const
+{
+	const auto &doors = nominal_rooms[room_idx].doors;
+
+	// --- FASE 1: EXPLORACIÓN ---
+	// Objetivo: Ir a donde nunca hemos ido.
+	// Buscamos puertas que tengan 'connects_to_room == -1'.
+	// Esto significa que sabemos que hay puerta, pero no qué hay detrás.
+	std::vector<int> unknown_doors;
+	for (int i = 0; i < doors.size(); ++i)
+	{
+		if (doors[i].connects_to_room == -1)
+		{
+			unknown_doors.push_back(i);
+		}
+	}
+
+	// Si hay puertas desconocidas, elegimos una (puede ser la primera o aleatoria entre ellas)
+	if (!unknown_doors.empty())
+	{
+		qInfo() << "Estrategia: Explorar puerta desconocida.";
+		return unknown_doors[0];
+	}
+
+	// --- FASE 2: NAVEGACIÓN / ANTI-BUCLE ---
+	// Si llegamos aquí, es que YA CONOCEMOS todas las puertas de esta habitación.
+	// Estamos en una habitación "resuelta". Debemos salir para seguir buscando en otro lado.
+
+	// Regla: Intentar NO volver inmediatamente por la puerta por la que acabamos de entrar (current_door),
+	// a menos que sea un callejón sin salida (solo 1 puerta).
+
+	if (doors.size() > 1)
+	{
+		// Buscamos cualquier puerta que NO sea la actual
+		for (int i = 0; i < doors.size(); ++i)
+		{
+			if (i != current_door) // current_door es por la que entramos tras el TURN
+			{
+				qInfo() << "Estrategia: Evitar volver atrás, tomando ruta alternativa.";
+				return i;
+			}
+		}
+	}
+
+	// --- FASE 3: CALLEJÓN SIN SALIDA ---
+	// Si solo hay 1 puerta y ya la conocemos (es por la que entramos),
+	// no hay opción: tenemos que dar la vuelta.
+	qInfo() << "Estrategia: Callejón sin salida, volviendo.";
+	return 0;
 }
 
 SpecificWorker::RetVal SpecificWorker::orient_to_door(const RoboCompLidar3D::TPoints &points, const Door &door)
 {
-	auto door_center = door.center();
+	// 1. Re-detectar puertas locales para asegurar precisión a corta distancia
+	auto detected_doors = door_detector.doors();
 
-	float angle_to_door = std::atan2(door_center.y(), door_center.x());
-
-	if(angle_to_door < M_PI_2 + params.RELOCAL_DELTA && angle_to_door > M_PI_2 - params.RELOCAL_DELTA)
-	{
-		// Está mirando a la puerta -> Avanzar
-		return {STATE::CROSS_DOOR, 0, 0};
+	// Safety: Si perdemos visual de la puerta (oclusión/ruido), mantenemos un giro suave de búsqueda
+	if (detected_doors.empty()) {
+		return {STATE::ORIENT_TO_DOOR, 0.f, 0.2f};
 	}
 
-	// No está orientado -> Girar hacia la puerta
-	auto [adv, rot] = robot_controller(door_center);
+	// 2. Seleccionar la puerta física más cercana (asumimos que es la que tenemos delante)
+	auto it = std::ranges::min_element(detected_doors, [](const Door &a, const Door &b){
+	   return a.center().norm() < b.center().norm();
+	});
+	const Door &target_local_door = *it;
 
+	// 3. Calcular el ángulo hacia el centro de la puerta
+	// Queremos que el centro de la puerta esté en ángulo 0 (eje X del robot)
+	auto center = target_local_door.center();
+	float angle_to_center = std::atan2(center.y(), center.x());
+
+	// 4. Comprobar alineación
+	// params.RELOCAL_MAX_ORIENTED_ERROR suele ser ~0.1 rad (5-6 grados)
+	if (std::abs(angle_to_center) < params.RELOCAL_MAX_ORIENTED_ERROR)
+	{
+		qInfo() << __FUNCTION__ << "Alineado con puerta (Error:" << angle_to_center << " rad). Cruzando.";
+		// Paramos rotación y pasamos a cruzar
+		return {STATE::CROSS_DOOR, 0.f, 0.f};
+	}
+
+	// 5. Girar para corregir el error angular
+	// Controlador P simple: velocidad proporcional al error
+	float Kp = 1.2f;
+	float rot = Kp * angle_to_center;
+
+	// Saturación para evitar giros bruscos
+	if (rot > params.MAX_ROT_SPEED) rot = params.MAX_ROT_SPEED;
+	if (rot < -params.MAX_ROT_SPEED) rot = -params.MAX_ROT_SPEED;
+
+	// Solo rotamos, no avanzamos
 	return {STATE::ORIENT_TO_DOOR, 0.0f, rot};
 }
 
@@ -251,44 +421,134 @@ SpecificWorker::RetVal SpecificWorker::goto_room_center(const RoboCompLidar3D::T
 
 		door_crossing.track_entering_door(door_detector.doors());
 		return {STATE::GOTO_ROOM_CENTER, adv, rot}; //Estado actual y velociades calculadas
-	}else { //No se detecta el centro
-		return {STATE::GOTO_ROOM_CENTER, 0.f, 0.f};
 	}
+
+	return {STATE::GOTO_ROOM_CENTER, 0.f, 0.f};
 }
 
 SpecificWorker::RetVal SpecificWorker::cross_door(const RoboCompLidar3D::TPoints &points, const Door &door)
 {
-	auto door_center = door.center();
+	//Variables para el tiempo
+	static bool first_time = time;
+	static std::chrono::time_point<std::chrono::high_resolution_clock> start;
 
-	// initialise robot pose
-	localised = false;
-	robot_pose.setIdentity();
-	robot_pose.translate(Eigen::Vector2f(0.0,0.0));
+	//Constantes de la manioblra
+	const float CROSS_SPEED = 500.0f;
+	const long CROSS_TIME_MS = 3000; //3 segundos -> recorre 1.5 metros aprox
 
-	Eigen::Vector2f v = door.p2 - door.p1;
+	if (first_time) {
+		first_time = false;
+		start = std::chrono::high_resolution_clock::now();
 
-	Eigen::Vector2f perp(-v.y(), v.x());
-	perp.normalize();
+		localised = false;
 
-	Eigen::Vector2f pA = door_center + perp * params.DOOR_REACHED_DIST;
-	Eigen::Vector2f pB = door_center - perp * params.DOOR_REACHED_DIST;
+		return {STATE::CROSS_DOOR, CROSS_SPEED, 0.0f};
+	}
 
-	auto target_local = pA.y() > pB.y() ? pA : pB;
+	const auto elapsed = std::chrono::high_resolution_clock::now() - start;
+	const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
 
-	// Usamos el umbral definido en los parametros
-	if (target_local.norm() < params.RELOCAL_CENTER_EPS)
-	{
-		// Paramos elrobot (0,0) y cambiamos de estado
+	if (elapsed_ms <= CROSS_TIME_MS) {
+		return {STATE::CROSS_DOOR, CROSS_SPEED, 0.0f};
+	}
+
+	first_time = true;
+
+	if (current_room < 0 || current_door < 0) {
+		qWarning() << __FUNCTION__ << "Indices de habitacion/puerta invalidos. Cambiamos a LOCALISE.";
+		return {STATE::LOCALISE, 0.f, 0.f};
+	}
+
+	//Obtenemos informacion de la puerta que acabamos de cruzar
+	const auto &leaving_door = nominal_rooms[current_room].doors[current_door];
+	int next_room_idx = leaving_door.connects_to_room;
+
+	//Decision de estado
+
+	//Entrando a una habitacion visitada
+	if (next_room_idx >= 0 && next_room_idx < (int)nominal_rooms.size() && nominal_rooms[next_room_idx].visited) {
+		//Actualizamos indices a la nueva habitacion
+		int next_door_idx = leaving_door.connects_to_door;
+		current_room = next_room_idx;
+		current_door = next_door_idx;
+
+		//Recalculamos la pose del robot en la nueva habitacion
+		const auto &entering_door = nominal_rooms[current_room].doors[current_door];
+		Eigen::Vector2f door_center = entering_door.center_global();
+
+		//Inicializamos la pose del robot relativa a esa puerta
+		robot_pose.setIdentity();
+		door_center.y() -= 500; //Ajuste manual segun referencia
+		robot_pose.translate(door_center);
+
+		//Ya estamos localizados en la nueva habitacion
+		localised = true;
+		qInfo() << "Entrando a habitacion conocida " << current_room << ". Localizando. ";
 		return {STATE::GOTO_ROOM_CENTER, 0.f, 0.f};
 	}
 
-	auto [adv, rot] = robot_controller(target_local);
-	return {STATE::CROSS_DOOR, adv, rot};
+	//Entrando en habitacion desconocida
+	else {
+		//Guardamos informacion para el algoritmo de 'DoorCrossing'
+		door_crossing = DoorCrossing{current_room, current_door};
+
+		//Marcamos la puerta de salida como visitada
+		nominal_rooms[current_room].doors[current_door].visited = true;
+
+		qInfo() << "Entrando a habitacion desconocida. Iniciando LOCALISE.";
+		return {STATE::LOCALISE, 0.f, 0.f};
+	}
 }
 
 SpecificWorker::RetVal SpecificWorker::update_pose(const Corners &corners, const Match &match)
 {
+	// Validamos que tengamos suficientes correspondencias
+	if (match.empty() || match.size() < 3) {
+		qWarning() << __FUNCTION__ <<"Not enought matches to estimate pose";
+		return {STATE::LOCALISE, 0.0f, 0.0f};
+	}
 
+	// Resolvemos la corrección de pose
+	Eigen::Vector3d pose_correction = solve_pose(corners, match);
+
+	// Validar que no hay NaN (error numérico)
+	if (pose_correction.array().isNaN().any()) {
+		qWarning() << __FUNCTION__ << "NaN values in pose correction";
+		return {STATE::LOCALISE, 0.0f, 0.0f};
+	}
+
+	// Aplicamos la correción a la pose del robot
+	robot_pose.translate(Eigen::Vector2f(pose_correction(0), pose_correction(1)));
+	robot_pose.rotate(Eigen::Rotation2Df(pose_correction(2)));
+
+	// Calculamos el error máximo de las correspondencias
+	const auto max_error_iter = std::ranges::max_element(match, [](const auto &a, const auto &b) {
+		return std::get<2>(a) < std::get<2>(b);
+	});
+
+	float max_match_error = std::get<2>(*max_error_iter);
+
+	// Log para debugging
+	qDebug() << __FUNCTION__ << "Max match error:" << max_match_error;
+
+	// PASO 6: Transicionar según el error
+	if (max_match_error < params.RELOCAL_DONE_MATCH_MAX_ERROR)
+	{
+		// Localización completada exitosamente
+		qInfo() << "Localization successful! Error:" << max_match_error;
+		return {STATE::TURN, 0.0f, 0.0f};
+	}
+	else if (max_match_error < 2000.0f)
+	{
+		// Localización en progreso, continuar refinando
+		return {STATE::LOCALISE, 0.0f, 0.0f};
+	}
+	else
+	{
+		// Error muy grande, volver a centrar en la habitación
+		qWarning() << "Large match error, returning to center";
+		return {STATE::GOTO_ROOM_CENTER, 0.0f, 0.0f};
+	}
 }
 
 SpecificWorker::RetVal SpecificWorker::localise(const RoboCompLidar3D::TPoints &points, QGraphicsScene *scene) {
