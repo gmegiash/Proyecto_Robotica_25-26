@@ -1,0 +1,23 @@
+[[components]]
+name = "bridge"
+cwd = "~/robocomp/components/webots-bridge"
+cmd = "bin/Webots2Robocomp etc/config"
+ice_name = "Webots2Robocomp:tcp -h localhost -p 10006"
+
+[[components]]
+name = "helios"
+cwd = "~/robocomp/components/robocomp-robolab/components/hardware/laser/lidar3D"
+cmd = "bin/Lidar3D etc/config_helios_webots"
+ice_name = "Lidar3D:tcp -h localhost -p 10098"
+
+[[components]]
+name = "pearl"
+cwd = "~/robocomp/components/robocomp-robolab/components/hardware/laser/lidar3D"
+cmd = "bin/Lidar3D etc/config_pearl_webots"
+ice_name = "Lidar3D:tcp -h localhost -p 11990"
+
+[[components]]
+name = "MNIST"
+cwd = "../mnist_detector"
+cmd = "bin/MNIST etc/config"
+ice_name = "MNIST:tcp -h localhost -p 10111"
