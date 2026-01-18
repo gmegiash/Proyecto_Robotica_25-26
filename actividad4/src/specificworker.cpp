@@ -17,7 +17,6 @@
  *    along with RoboComp.  If not, see <http://www.gnu.org/licenses/>.
  */
 #include "specificworker.h"
-#include "specificworker.h"
 #include <cmath>
 #include <ranges>
 #include <cppitertools/groupby.hpp>
@@ -34,22 +33,6 @@ SpecificWorker::SpecificWorker(const ConfigLoader& configLoader, TuplePrx tprx, 
 		#ifdef HIBERNATION_ENABLED
 			hibernationChecker.start(500);
 		#endif
-
-		// Example statemachine:
-		/***
-		//Your definition for the statesmachine (if you dont want use a execute function, use nullptr)
-		states["CustomState"] = std::make_unique<GRAFCETStep>("CustomState", period,
-															std::bind(&SpecificWorker::customLoop, this),  // Cyclic function
-															std::bind(&SpecificWorker::customEnter, this), // On-enter function
-															std::bind(&SpecificWorker::customExit, this)); // On-exit function
-
-		//Add your definition of transitions (addTransition(originOfSignal, signal, dstState))
-		states["CustomState"]->addTransition(states["CustomState"].get(), SIGNAL(entered()), states["OtherState"].get());
-		states["Compute"]->addTransition(this, SIGNAL(customSignal()), states["CustomState"].get()); //Define your signal in the .h file under the "Signals" section.
-
-		//Add your custom state
-		statemachine.addState(states["CustomState"].get());
-		***/
 
 		statemachine.setChildMode(QState::ExclusiveStates);
 		statemachine.start();
@@ -77,25 +60,19 @@ void SpecificWorker::initialize()
 	}
 	else
 	{
-		///////////// Your code ////////
 		// Viewer
 		viewer = new AbstractGraphicViewer(this->frame, params.GRID_MAX_DIM);
 		auto [r, e] = viewer->add_robot(params.ROBOT_WIDTH, params.ROBOT_LENGTH, 0, 100, QColor("Blue"));
 		robot_draw = r;
-		//viewer->show();
-
 
 		viewer_room = new AbstractGraphicViewer(this->frame_room, params.GRID_MAX_DIM);
 		auto [rr, re] = viewer_room->add_robot(params.ROBOT_WIDTH, params.ROBOT_LENGTH, 0, 100, QColor("Blue"));
 		robot_room_draw = rr;
-		//viewer_room->show();
 		show();
-
 
 		// initialise robot pose
 		robot_pose.setIdentity();
 		robot_pose.translate(Eigen::Vector2f(0.0,0.0));
-
 
 		// time series plotter for match error
 		TimeSeriesPlotter::Config plotConfig;
@@ -108,7 +85,6 @@ void SpecificWorker::initialize()
 		time_series_plotter = std::make_unique<TimeSeriesPlotter>(frame_plot_error, plotConfig);
 		match_error_graph = time_series_plotter->addGraph("", Qt::blue);
 
-
 		// stop robot
 		move_robot(0, 0);
 
@@ -119,55 +95,56 @@ void SpecificWorker::initialize()
 
 
 void SpecificWorker::compute() {
-	auto data = read_data();
-
-	if (!door_detector.get_current_door().has_value())
-	{
-		qInfo() << "No door detected";
-		return;
-	}
-	auto door = door_detector.get_current_door().value();
+	const auto data = read_data();
 
 	estimated_center = center_estimator.estimate(data);
-
-	// compute corners
-	const auto &[corners, lines] = room_detector.compute_corners(data, &viewer->scene);
-	draw_lidar(data, estimated_center, &viewer->scene);
-
-	auto [nominal_room, match, max_match_error] = compute_match(corners);
 
 	// update robot pose
 	if (localised)
 	{
 		label_localised->setText("True");
-		draw_current_room(nominal_room, &viewer_room->scene);
-		if (const auto res = update_robot_pose(current_room, corners, true); res.has_value())
+		draw_current_room(&viewer_room->scene);
+		if (const auto res = update_robot_pose(data, true); res.has_value())
 		{
 			robot_pose = res.value().first;
-			max_match_error = res.value().second;
+			const auto max_match_error = res.value().second;
+			const auto &robot_pos = robot_pose.translation();
+			robot_room_draw->setPos(robot_pos.x(),robot_pos.y());
+			const double angle = qRadiansToDegrees(std::atan2(robot_pose.rotation()(1, 0), robot_pose.rotation()(0, 0)));
+			robot_room_draw->setRotation(angle);
+			robot_room_draw->show();
 			time_series_plotter->addDataPoint(match_error_graph,max_match_error);
 		}
 	}
-	else
+	else {
 		label_localised->setText("False");
-
-
+		robot_room_draw->hide();
+	}
 
 	// Process state machine
-	RetVal ret_val = process_state(data, door);
+	RetVal ret_val = process_state(data);
 	auto [st, adv, rot] = ret_val;
 	state = st;
-
-
 	// Send movements commands to the robot
-	//qInfo() << __FUNCTION__ << "Adv: " << adv << " Rot: " << rot;
 	move_robot(adv, rot);
 
+	draw_lidar(data, &viewer->scene);
+	draw_room_center(&viewer->scene);
 
-	// draw robot in viewer
-	robot_room_draw->setPos(robot_pose.translation().x(), robot_pose.translation().y());
-	const double angle = qRadiansToDegrees(std::atan2(robot_pose.rotation()(1, 0), robot_pose.rotation()(0, 0)));
-	robot_room_draw->setRotation(angle);
+	static std::vector<QGraphicsItemGroup*> to_remove;
+
+	for (const auto item_group: to_remove)
+	{
+		delete item_group;
+	}
+	to_remove.clear();
+
+	for (const auto item_group: to_draw)
+	{
+		item_group->show();
+		to_remove.push_back(item_group);
+	}
+	to_draw.clear();
 
 	// update GUI
 	label_state->setText(to_string(state));
@@ -176,240 +153,27 @@ void SpecificWorker::compute() {
 	lcdNumber_rot->display(rot);
 	lcdNumber_x->display(robot_pose.translation().x());
 	lcdNumber_y->display(robot_pose.translation().y());
-	lcdNumber_angle->display(angle);
+	//lcdNumber_angle->display(angle);
 	last_time = std::chrono::high_resolution_clock::now();
+	lcdNumber_current_room->display(current_room); lcdNumber_current_door->display(current_door);
+	lcdNumber_entering_room->display(door_crossing.entering_room_index); lcdNumber_entering_door->display(door_crossing.entering_room_index);
+	lcdNumber_leaving_room->display(door_crossing.leaving_room_index); lcdNumber_leaving_door->display(door_crossing.leaving_door_index);
 }
 
-SpecificWorker::RetVal SpecificWorker::goto_door(const RoboCompLidar3D::TPoints &points, const Door &door)
+SpecificWorker::RetVal SpecificWorker::process_state(const RoboCompLidar3D::TPoints &points)
 {
-	static auto last_valid_time = std::chrono::steady_clock::now();
-	static float last_adv = 0.0f;
-	static float last_rot = 0.0f;
-	const int BLIND_THREASHOLD_MS = 2000; //2 segundos de persistencia
-
-	QGraphicsScene *scene = &viewer->scene;
-
-	Doors doors;
-
-	if ((doors = door_detector.doors()).empty()) {
-		//Calculamos cuanto tiempo hace que perdimos la puerta
-		auto now = std::chrono::steady_clock::now();
-		auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_valid_time).count();
-
-		if (elapsed_ms < BLIND_THREASHOLD_MS) {
-			//Seguimos con la ultima velocidad conocida
-			return {STATE::GOTO_DOOR, last_adv, last_rot};
-		}
-		else {
-			//Se acaba el tiempo, paramos
-			qInfo() << __FUNCTION__ << "No detecto puerta desde hace " << elapsed_ms << "ms. Parando. ";
-			return {STATE::GOTO_DOOR, 0.f, 0.f};
-		}
+	switch(state) {
+		case STATE::IDLE:               return {STATE::IDLE, 0, 0};
+		case STATE::GOTO_ROOM_CENTER:   return goto_room_center();
+		case STATE::TURN:               return turn(points);
+		case STATE::GOTO_DOOR:          return goto_door(points);
+		case STATE::ORIENT_TO_DOOR:     return orient_to_door(points);
+		case STATE::CROSS_DOOR:         return cross_door(points);
+		default:						return {STATE::IDLE, 0, 0};
 	}
-
-	//Hemos visto puertas -> Reseteamos el temporizados
-	last_valid_time = std::chrono::steady_clock::now();
-
-	//Seleccion de la mejor puerta
-	Door target_door;
-	if (localised && current_room != -1 && current_door != -1){
-		//Si esta localizado, buscamos la que coincide con la puerta nominal del mapa
-		const auto dn = nominal_rooms[current_room].doors[current_door];
-		const auto sd = std::ranges::min_element(doors, [dn, this](const auto &a, const auto &b)
-			{ return (a.center() - robot_pose.inverse() * dn.center_global()).norm() < (b.center() - robot_pose.inverse() * dn.center_global()).norm(); });
-		target_door = *sd;
-	}
-	else {
-		//Si no esta localizado, cogemos la que terngamos mas enfrente
-		const auto sd = std::ranges::min_element(doors, [](const auto &a, const auto &b)
-			{ return abs(a.p1_angle) < abs(b.p1_angle); });
-		target_door = *sd;
-	}
-
-	//calculamos el punto objetivo antes de cruzar la puerta
-	const auto target = target_door.center_before(robot_pose.translation(), params.DIST_TARGET_BEFORE_DOOR);
-	const auto dist_to_door = target.norm();
-
-	static QGraphicsItem *door_target_draw = nullptr;
-	if (door_target_draw != nullptr)
-		scene->removeItem(door_target_draw);
-
-	door_target_draw = scene->addEllipse(-50, -50, 100, 100, QPen(Qt::magenta), QBrush(Qt::magenta));
-	door_target_draw->setPos(target.x(), target.y());
-
-	//Condicion de exito
-	if (dist_to_door < params.DOOR_REACHED_DIST) {
-		last_adv = 0;
-		last_rot = 0;
-		return{STATE::ORIENT_TO_DOOR, 0.f, 0.f};
-	}
-
-	//Controlador
-	const auto &[adv, rot] = robot_controller(target);
-
-	last_adv = adv;
-	last_rot = rot;
-
-	return {STATE::GOTO_DOOR, adv, rot};
 }
 
-SpecificWorker::RetVal SpecificWorker::turn()
-{
-	auto [detected,room_idx, left_right] = rc::ImageProcessor::check_colour_patch_in_image(camera360rgb_proxy);
-	if (detected)
-	{
-		current_room = room_idx;
-		localised = true;
-
-		if (!nominal_rooms[current_room].visited)
-		{
-			qInfo() << "Habitación " << current_room << " visitada por primera vez. Guardando puertas.";
-			nominal_rooms[current_room].visited = true;
-
-			auto detected_doors = door_detector.doors();
-			nominal_rooms[current_room].doors.clear(); // Limpiamos para llenar con datos reales
-
-			// Transformamos las puertas detectadas (locales) a globales y las guardamos
-			for(const auto &d : detected_doors)
-			{
-				// Convertir p1 y p2 a coordenadas globales usando la pose actual del robot
-				Eigen::Vector2f p1_g = robot_pose * d.p1;
-				Eigen::Vector2f p2_g = robot_pose * d.p2;
-
-				// Guardamos una nueva puerta "Nominal" en el mapa
-				Door global_door;
-				global_door.p1 = p1_g;
-				global_door.p2 = p2_g;
-				nominal_rooms[current_room].doors.push_back(global_door);
-			}
-		}
-
-		if (door_crossing.valid)
-		{
-			// Recuperamos índices de donde veníamos
-			int prev_room_idx = door_crossing.leaving_room_index;
-			int prev_door_idx = door_crossing.leaving_door_index;
-			int curr_door_idx = door_crossing.entering_door_index;
-
-			// Actualizamos el grafo: La puerta de atrás conecta con la de aquí
-			nominal_rooms[prev_room_idx].doors[prev_door_idx].connects_to_room = current_room;
-			nominal_rooms[current_room].doors[curr_door_idx].connects_to_room = prev_room_idx;
-
-			qInfo() << "CONEXIÓN REALIZADA: Room " << prev_room_idx << " <--> Room " << current_room;
-
-			door_crossing.valid = false; // Ya hemos consumido el evento de cruce
-		}
-
-		current_door = choose_next_door(current_room);
-
-		if (current_door != -1)
-			return {STATE::GOTO_DOOR, 0, 0};
-
-		return {STATE::IDLE, 0, 0};
-
-	}
-
-	float rot = params.RELOCAL_ROT_SPEED;
-	if (left_right == -1) rot = -rot; // Girar hacia la izquierda si la pista lo indica
-
-	return {STATE::TURN, 0, rot};
-}
-
-int SpecificWorker::choose_next_door(int room_idx) const
-{
-	const auto &doors = nominal_rooms[room_idx].doors;
-
-	// --- FASE 1: EXPLORACIÓN ---
-	// Objetivo: Ir a donde nunca hemos ido.
-	// Buscamos puertas que tengan 'connects_to_room == -1'.
-	// Esto significa que sabemos que hay puerta, pero no qué hay detrás.
-	std::vector<int> unknown_doors;
-	for (int i = 0; i < doors.size(); ++i)
-	{
-		if (doors[i].connects_to_room == -1)
-		{
-			unknown_doors.push_back(i);
-		}
-	}
-
-	// Si hay puertas desconocidas, elegimos una (puede ser la primera o aleatoria entre ellas)
-	if (!unknown_doors.empty())
-	{
-		qInfo() << "Estrategia: Explorar puerta desconocida.";
-		return unknown_doors[0];
-	}
-
-	// --- FASE 2: NAVEGACIÓN / ANTI-BUCLE ---
-	// Si llegamos aquí, es que YA CONOCEMOS todas las puertas de esta habitación.
-	// Estamos en una habitación "resuelta". Debemos salir para seguir buscando en otro lado.
-
-	// Regla: Intentar NO volver inmediatamente por la puerta por la que acabamos de entrar (current_door),
-	// a menos que sea un callejón sin salida (solo 1 puerta).
-
-	if (doors.size() > 1)
-	{
-		// Buscamos cualquier puerta que NO sea la actual
-		for (int i = 0; i < doors.size(); ++i)
-		{
-			if (i != current_door) // current_door es por la que entramos tras el TURN
-			{
-				qInfo() << "Estrategia: Evitar volver atrás, tomando ruta alternativa.";
-				return i;
-			}
-		}
-	}
-
-	// --- FASE 3: CALLEJÓN SIN SALIDA ---
-	// Si solo hay 1 puerta y ya la conocemos (es por la que entramos),
-	// no hay opción: tenemos que dar la vuelta.
-	qInfo() << "Estrategia: Callejón sin salida, volviendo.";
-	return 0;
-}
-
-SpecificWorker::RetVal SpecificWorker::orient_to_door(const RoboCompLidar3D::TPoints &points, const Door &door)
-{
-	// 1. Re-detectar puertas locales para asegurar precisión a corta distancia
-	auto detected_doors = door_detector.doors();
-
-	// Safety: Si perdemos visual de la puerta (oclusión/ruido), mantenemos un giro suave de búsqueda
-	if (detected_doors.empty()) {
-		return {STATE::ORIENT_TO_DOOR, 0.f, 0.2f};
-	}
-
-	// 2. Seleccionar la puerta física más cercana (asumimos que es la que tenemos delante)
-	auto it = std::ranges::min_element(detected_doors, [](const Door &a, const Door &b){
-	   return a.center().norm() < b.center().norm();
-	});
-	const Door &target_local_door = *it;
-
-	// 3. Calcular el ángulo hacia el centro de la puerta
-	// Queremos que el centro de la puerta esté en ángulo 0 (eje X del robot)
-	auto center = target_local_door.center();
-	float angle_to_center = std::atan2(center.y(), center.x());
-
-	// 4. Comprobar alineación
-	// params.RELOCAL_MAX_ORIENTED_ERROR suele ser ~0.1 rad (5-6 grados)
-	if (std::abs(angle_to_center) < params.RELOCAL_MAX_ORIENTED_ERROR)
-	{
-		qInfo() << __FUNCTION__ << "Alineado con puerta (Error:" << angle_to_center << " rad). Cruzando.";
-		// Paramos rotación y pasamos a cruzar
-		return {STATE::CROSS_DOOR, 0.f, 0.f};
-	}
-
-	// 5. Girar para corregir el error angular
-	// Controlador P simple: velocidad proporcional al error
-	float Kp = 1.2f;
-	float rot = Kp * angle_to_center;
-
-	// Saturación para evitar giros bruscos
-	if (rot > params.MAX_ROT_SPEED) rot = params.MAX_ROT_SPEED;
-	if (rot < -params.MAX_ROT_SPEED) rot = -params.MAX_ROT_SPEED;
-
-	// Solo rotamos, no avanzamos
-	return {STATE::ORIENT_TO_DOOR, 0.0f, rot};
-}
-
-SpecificWorker::RetVal SpecificWorker::goto_room_center(const RoboCompLidar3D::TPoints &points)
+SpecificWorker::RetVal SpecificWorker::goto_room_center()
 {
 	if (estimated_center.has_value()) {
 		if (estimated_center.value().norm() < params.RELOCAL_CENTER_EPS) {
@@ -419,85 +183,233 @@ SpecificWorker::RetVal SpecificWorker::goto_room_center(const RoboCompLidar3D::T
 
 		auto[adv, rot] = robot_controller(target);
 
-		door_crossing.track_entering_door(door_detector.doors());
+		if (door_crossing.valid) door_crossing.track_entering_door(door_detector.doors());
 		return {STATE::GOTO_ROOM_CENTER, adv, rot}; //Estado actual y velociades calculadas
 	}
 
 	return {STATE::GOTO_ROOM_CENTER, 0.f, 0.f};
 }
 
-SpecificWorker::RetVal SpecificWorker::cross_door(const RoboCompLidar3D::TPoints &points, const Door &door)
+SpecificWorker::RetVal SpecificWorker::turn(const RoboCompLidar3D::TPoints &points)
 {
-	//Variables para el tiempo
-	static bool first_time = time;
-	static std::chrono::time_point<std::chrono::high_resolution_clock> start;
-
-	//Constantes de la manioblra
-	const float CROSS_SPEED = 500.0f;
-	const long CROSS_TIME_MS = 3000; //3 segundos -> recorre 1.5 metros aprox
-
-	if (first_time) {
-		first_time = false;
-		start = std::chrono::high_resolution_clock::now();
-
-		localised = false;
-
-		return {STATE::CROSS_DOOR, CROSS_SPEED, 0.0f};
-	}
-
-	const auto elapsed = std::chrono::high_resolution_clock::now() - start;
-	const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
-
-	if (elapsed_ms <= CROSS_TIME_MS) {
-		return {STATE::CROSS_DOOR, CROSS_SPEED, 0.0f};
-	}
-
-	first_time = true;
-
-	if (current_room < 0 || current_door < 0) {
-		qWarning() << __FUNCTION__ << "Indices de habitacion/puerta invalidos. Cambiamos a LOCALISE.";
-		return {STATE::LOCALISE, 0.f, 0.f};
-	}
-
-	//Obtenemos informacion de la puerta que acabamos de cruzar
-	const auto &leaving_door = nominal_rooms[current_room].doors[current_door];
-	int next_room_idx = leaving_door.connects_to_room;
-
-	//Decision de estado
-
-	//Entrando a una habitacion visitada
-	if (next_room_idx >= 0 && next_room_idx < (int)nominal_rooms.size() && nominal_rooms[next_room_idx].visited) {
-		//Actualizamos indices a la nueva habitacion
-		int next_door_idx = leaving_door.connects_to_door;
-		current_room = next_room_idx;
-		current_door = next_door_idx;
-
-		//Recalculamos la pose del robot en la nueva habitacion
-		const auto &entering_door = nominal_rooms[current_room].doors[current_door];
-		Eigen::Vector2f door_center = entering_door.center_global();
-
-		//Inicializamos la pose del robot relativa a esa puerta
-		robot_pose.setIdentity();
-		door_center.y() -= 500; //Ajuste manual segun referencia
-		robot_pose.translate(door_center);
-
-		//Ya estamos localizados en la nueva habitacion
+	if (door_crossing.valid) door_crossing.track_entering_door(door_detector.doors());
+	auto [detected,room_idx,left_right] = rc::ImageProcessor::check_colour_patch_in_image(camera360rgb_proxy);
+	if (detected)
+	{
+		current_room = room_idx;
 		localised = true;
-		qInfo() << "Entrando a habitacion conocida " << current_room << ". Localizando. ";
-		return {STATE::GOTO_ROOM_CENTER, 0.f, 0.f};
+
+		if (const auto res = update_robot_pose(points, true); res.has_value())
+		{
+			robot_pose = res.value().first;
+			const auto max_match_error = res.value().second;
+			time_series_plotter->addDataPoint(match_error_graph,max_match_error);
+		}
+
+		if (auto &room = nominal_rooms.at(current_room); !room.visited)
+		{
+			qInfo() << "Habitación " << current_room << " visitada por primera vez. Guardando puertas.";
+			room.visited = true;
+
+			const auto &detected_doors = door_detector.doors();
+			room.doors.clear(); // Limpiamos para llenar con datos reales
+
+			// Transformamos las puertas detectadas (locales) a globales y las guardamos
+			for(const auto &d : detected_doors)
+			{
+				// Convertir p1 y p2 a coordenadas globales usando la pose actual del robot
+				Eigen::Vector2f p1_g = room.get_projection_of_point_on_closest_wall(robot_pose * d.p1);
+				Eigen::Vector2f p2_g = room.get_projection_of_point_on_closest_wall(robot_pose * d.p2);
+				float p1_angle = atan2(p1_g.y(), p1_g.x());
+				float p2_angle = atan2(p2_g.y(), p2_g.x());
+
+				room.doors.emplace_back(p1_g, p1_angle, p2_g, p2_angle);
+			}
+		}
+
+		if (door_crossing.valid)
+		{
+			door_crossing.set_entering_data(current_room, nominal_rooms);
+
+			auto &leaving_door_info = nominal_rooms[door_crossing.leaving_room_index].doors[door_crossing.leaving_door_index];
+			leaving_door_info.connects_to_room = door_crossing.entering_room_index;
+			leaving_door_info.connects_to_door = door_crossing.entering_door_index;
+			leaving_door_info.visited = true;
+
+			auto &entering_door_info = nominal_rooms[door_crossing.entering_room_index].doors[door_crossing.entering_door_index];
+			entering_door_info.connects_to_room = door_crossing.leaving_room_index;
+			entering_door_info.connects_to_door = door_crossing.leaving_door_index;
+			entering_door_info.visited = true;
+		}
+
+		if (current_door = choose_next_door(); current_door != -1)
+		{
+			return {STATE::GOTO_DOOR, 0, 0};
+		}
+
+		return {STATE::IDLE, 0, 0};
 	}
 
-	//Entrando en habitacion desconocida
-	else {
-		//Guardamos informacion para el algoritmo de 'DoorCrossing'
-		door_crossing = DoorCrossing{current_room, current_door};
+	float rot = params.RELOCAL_ROT_SPEED;
+	if (left_right == -1) rot = -rot; // Girar hacia la izquierda si la pista lo indica
 
-		//Marcamos la puerta de salida como visitada
-		nominal_rooms[current_room].doors[current_door].visited = true;
+	return {STATE::TURN, 0, rot};
+}
 
-		qInfo() << "Entrando a habitacion desconocida. Iniciando LOCALISE.";
-		return {STATE::LOCALISE, 0.f, 0.f};
+unsigned long SpecificWorker::choose_next_door() const
+{
+	const auto &doors = nominal_rooms[current_room].doors;
+
+	std::vector<unsigned long> candidates;
+	for (const auto [i, door] : doors | iter::enumerate)
+	{
+		if (!door.visited)
+		{
+			candidates.push_back(i);
+		}
 	}
+
+	if (candidates.empty())
+	{
+		for (const auto [i, door] : doors | iter::enumerate)
+		{
+			candidates.push_back(i);
+		}
+	}
+
+	if (!candidates.empty())
+	{
+		const int random_idx = std::rand() % candidates.size();
+		const unsigned long chosen_door_idx = candidates[random_idx];
+
+		return chosen_door_idx;
+	}
+
+	return -1;
+}
+
+SpecificWorker::RetVal SpecificWorker::goto_door(const RoboCompLidar3D::TPoints &points)
+{
+	if (current_door == -1)
+	{
+		return {STATE::IDLE, 0, 0};
+	}
+
+	const auto &door = nominal_rooms[current_room].doors[current_door];
+
+	const auto target_global = door.center_before(robot_pose.translation(),params.DIST_TARGET_BEFORE_DOOR);
+	const auto target_local = robot_pose.inverse() * target_global;
+
+	const auto target_group = viewer->scene.createItemGroup({});
+	target_group->hide();
+	to_draw.push_back(target_group);
+
+	const QColor color("Cyan");
+	const QPen pen(color, 10);
+	const auto target_item = new QGraphicsEllipseItem(-25, -25, 100, 100, target_group);
+	target_item->setPen(pen);
+	target_item->setBrush(QBrush(color));
+	target_item->setPos(target_local.x(), target_local.y());
+
+	if (target_local.norm() < params.DOOR_REACHED_DIST) return {STATE::ORIENT_TO_DOOR,0,0};
+
+	const auto [adv, rot] = robot_controller(target_local);
+
+	return {STATE::GOTO_DOOR, adv, rot};
+}
+
+SpecificWorker::RetVal SpecificWorker::orient_to_door(const RoboCompLidar3D::TPoints &points)
+{
+	if (current_door == -1)
+	{
+		return {STATE::IDLE, 0, 0};
+	}
+
+	const auto &door = nominal_rooms[current_room].doors[current_door];
+
+	const auto target_global = door.center();
+	const auto target_local = robot_pose.inverse() * target_global;
+
+	const auto direct_angle = atan2(target_local.y(), target_local.x()) - M_PI_2;
+	if (!(direct_angle > params.RELOCAL_MAX_ORIENTED_ERROR || direct_angle < -params.RELOCAL_MAX_ORIENTED_ERROR))
+	{
+		return {STATE::CROSS_DOOR,0,0};
+	}
+
+	const auto [adv,rot] = robot_controller(target_local);
+	return {STATE::ORIENT_TO_DOOR, 0, rot};
+}
+
+SpecificWorker::RetVal SpecificWorker::cross_door(const RoboCompLidar3D::TPoints &points)
+{
+	static std::chrono::time_point<std::chrono::high_resolution_clock> start;
+    static bool started = false;
+
+    // 1. INICIALIZACIÓN
+    if (!started)
+	{
+    	localised = false;
+		door_crossing = DoorCrossing(current_room, current_door);
+		start = std::chrono::high_resolution_clock::now();
+		started = true;
+	}
+
+    // 2. COMPROBAR TIEMPO DE CRUCE A CIEGAS
+    if (const auto elapsedTime = std::chrono::high_resolution_clock::now() - start; elapsedTime > std::chrono::milliseconds(params.BLIND_CROSS_TIME))
+    {
+		started = false;
+
+		const auto &crossed_room_values = nominal_rooms[current_room];
+    	const auto &crossed_door_values = crossed_room_values.doors[current_door];
+
+		// Si la puerta por la que salimos tiene información de destino...
+		if (crossed_door_values.visited)
+		{
+			// A. Recuperamos índices y objetos de la NUEVA habitación
+			const auto &connected_room_idx = crossed_door_values.connects_to_room;
+			const auto &connected_room = nominal_rooms[connected_room_idx];
+
+			// B. Recuperamos la puerta en la NUEVA habitación (donde estamos ahora)
+			// Ojo: usamos 'connects_to_door' para saber cuál es la puerta correspondiente en la nueva sala
+			const auto &connected_door_idx = crossed_door_values.connects_to_door;
+			const auto &connected_door = connected_room.doors[connected_door_idx];
+
+			// C. ACTUALIZACIÓN CRÍTICA DE POSE
+			current_room = connected_room_idx;
+
+			// 1. Reset completo (limpiamos basura de la sala anterior)
+			robot_pose.setIdentity();
+
+			// 2. Traslación: Nos ponemos en el centro de la puerta de la nueva sala
+			const auto connected_door_center = connected_door.center();
+			robot_pose.translate(connected_door_center);
+
+			// 3. Rotación: EL CAMBIO CLAVE
+			// Queremos mirar HACIA el centro (0,0). Vector = (0-x, 0-y)
+			const auto entering_angle = std::atan2(-connected_door_center.y(), -connected_door_center.x());
+
+			// Asignación directa a la matriz de rotación (más seguro que .rotate())
+			robot_pose.linear() = Eigen::Rotation2Df(entering_angle).toRotationMatrix();
+
+			qDebug()	<< "Cruce completado. Nueva Sala:" << current_room
+						<< "Puerta cruzada: " << connected_door_idx
+						<< "Pos:" << connected_door_center.x() << connected_door_center.y()
+						<< "Angulo Entrada (rad):" << entering_angle;
+			localised = true;
+		}
+		else
+		{
+			// Puerta desconocida -> Perdidos (o inicio de exploración)
+			qWarning() << "Cruzando a territorio desconocido. Reseteando a 0,0.";
+			localised = false;
+			robot_pose.setIdentity();
+			robot_pose.translate(Eigen::Vector2f(0.0,0.0));
+		}
+
+		return {STATE::GOTO_ROOM_CENTER, 0, 0};
+    }
+
+    return {STATE::CROSS_DOOR, params.BLIND_ADV_VELOCITY, 0};
 }
 
 SpecificWorker::RetVal SpecificWorker::update_pose(const Corners &corners, const Match &match)
@@ -571,45 +483,40 @@ SpecificWorker::RetVal SpecificWorker::localise(const RoboCompLidar3D::TPoints &
 	return {STATE::LOCALISE, 0.0f, 0.0f};
 }
 
-SpecificWorker::RetVal SpecificWorker::process_state(const RoboCompLidar3D::TPoints &data, const Door &door)
+void SpecificWorker::draw_lidar(const auto &points, QGraphicsScene *scene)
 {
-	switch(state) {
-		case STATE::IDLE:               return {STATE::IDLE, 0, 0};
+	QGraphicsItemGroup* lidar_group = scene->createItemGroup({});
+	lidar_group->hide();
+	to_draw.push_back(lidar_group);
 
-		case STATE::GOTO_ROOM_CENTER:   return goto_room_center(data);
-		case STATE::TURN:               return turn();
-		case STATE::GOTO_DOOR:          return goto_door(data, door);
-		case STATE::ORIENT_TO_DOOR:     return orient_to_door(data, door);
-		case STATE::CROSS_DOOR:         return cross_door(data, door);
-		//case STATE::LOCALISE: 			return localise(data, )
-		default:						return {STATE::IDLE, 0, 0};
+	const QColor color("LightGreen");
+	const QPen pen(color, 1);
+	const QBrush brush(color);
+
+	//const QBrush brush(color, Qt::SolidPattern);
+
+	for (const auto &p : points)
+	{
+		const auto point_item = new QGraphicsRectItem(-25, -25, 50, 50, lidar_group);
+		point_item->setPen(pen);
+		point_item->setBrush(brush);
+		point_item->setPos(p.x, p.y);
 	}
 }
 
-void SpecificWorker::draw_lidar(const auto &points,  std::optional<Eigen::Vector2d> center_opt, QGraphicsScene *scene)
-{
-	static std::vector<QGraphicsItem*> draw_points;
-	for (const auto &p : draw_points)
-	{
-		scene->removeItem(p);
-		delete p;
-	}
-	draw_points.clear();
+void SpecificWorker::draw_room_center(QGraphicsScene *scene) {
+	QGraphicsItemGroup* center_group = scene->createItemGroup({});
+	center_group->hide();
+	to_draw.push_back(center_group);
 
-	const QColor color("LightGreen");
-	const QPen pen(color, 10);
-	//const QBrush brush(color, Qt::SolidPattern);
-	for (const auto &p : points)
-	{
-		const auto dp = scene->addRect(-25, -25, 50, 50, pen);
-		dp->setPos(p.x, p.y);
-		draw_points.push_back(dp);   // add to the list of points to be deleted next time
-	}
+	const QColor color("Red");
+	const QPen pen(color, 1);
+	const QBrush brush(color);
 
-	auto center_values = center_opt.value();
-	const auto center = scene->addEllipse(-100, -100, 200, 200, QPen(QColor("red")), QBrush(QColor("red")));
-	center->setPos(center_values.x(), center_values.y());
-	draw_points.push_back(center);
+	const auto center_item = new QGraphicsEllipseItem(-25, -25, 100, 100, center_group);
+	center_item->setPen(pen);
+	center_item->setBrush(brush);
+	center_item->setPos(estimated_center->x(), estimated_center->y());
 }
 
 void SpecificWorker::update_robot_position()
@@ -617,27 +524,52 @@ void SpecificWorker::update_robot_position()
 	try
 	{
 		robot_room_draw->setPos(robot_pose.translation().x(), robot_pose.translation().y());
-		double angle = std::atan2(robot_pose.rotation()(1, 0), robot_pose.rotation()(0, 0));
+		const double angle = std::atan2(robot_pose.rotation()(1, 0), robot_pose.rotation()(0, 0));
 		robot_room_draw->setRotation(qRadiansToDegrees(angle));
 	}
 	catch (const Ice::Exception &e){std::cout << e.what() << std::endl;}
 }
 
-void SpecificWorker::draw_current_room(const NominalRoom &room, QGraphicsScene *scene)
+void SpecificWorker::draw_current_room(QGraphicsScene *scene)
 {
-	static std::vector<QGraphicsItem*> draw_points;
-	for (const auto &p : draw_points) {
-		scene->removeItem(p);
-		delete p;
+	if (current_room == -1)	return;
+
+	QGraphicsItemGroup* room_group = scene->createItemGroup({});
+	room_group->hide();
+	to_draw.push_back(room_group);
+
+	const auto room_number = new QGraphicsTextItem(QString::number(current_room),room_group);
+	room_number->setPos(0,0);
+	QRectF room_number_label = room_number->boundingRect();
+	room_number->setTransformOriginPoint(room_number_label.center());
+	room_number->setTransform(QTransform::fromScale(-30, 30));
+	room_number->setRotation(180);
+
+	const QPen room_rect_pen(Qt::black, 30);
+	const QColor color("Red");
+	const QPen door_pen(color, 45);
+
+	auto &room_to_draw = nominal_rooms[current_room];
+
+	const auto room_rect_item = new QGraphicsRectItem(room_to_draw.rect(),room_group);
+	room_rect_item->setPen(room_rect_pen);
+
+	for (const auto &[index,door] : room_to_draw.doors | iter::enumerate)
+	{
+		const auto door_p1 = room_to_draw.get_projection_of_point_on_closest_wall(door.p1);
+		const auto door_p2 = room_to_draw.get_projection_of_point_on_closest_wall(door.p2);
+		const auto door_center = door.center();
+		const auto room_door_item = new QGraphicsLineItem(door_p1.x(), door_p1.y(), door_p2.x(), door_p2.y(),room_group);
+		room_door_item->setPen(door_pen);
+
+		const auto door_label = new QGraphicsTextItem("Door:"+QString::number(index)+"\n"+
+			"Room(Door):"+QString::number(door.connects_to_room)+"("+QString::number(door.connects_to_door)+")"+"\n"+
+			"Pos:"+QString::number(door.center().x())+","+QString::number(door.center().y()),room_group);
+		QRectF bounds = door_label->boundingRect();
+		door_label->setPos(door_center.x()-bounds.width()/2, door_center.y());
+		door_label->setTransformOriginPoint(bounds.center());
+		door_label->setTransform(QTransform::fromScale(10, -10));
 	}
-	draw_points.clear();
-
-	// draw room in viewer_room
-	auto dp = viewer_room->scene.addRect(room.rect(), QPen(Qt::black, 30));
-	draw_points.push_back(dp);
-
-	auto puertas = door_detector.doors();
-
 }
 
 RoboCompLidar3D::TPoints SpecificWorker::read_data()
@@ -647,64 +579,24 @@ RoboCompLidar3D::TPoints SpecificWorker::read_data()
 	return door_detector.filter_points(data.points);
 }
 
-void SpecificWorker::print_match(const Match &match, const float error) const
-{
-
-}
-
-float SpecificWorker::compute_match_error(const Match &match)
-{
-	if (match.empty())
-		return std::numeric_limits<float>::infinity();
-
-	double sum = std::transform_reduce(
-		match.begin(), match.end(),
-		0.0,
-		std::plus<double>{},        // reduce
-		[](const auto &m){          // transform
-			return std::get<2>(m);
-		}
-	);
-
-	return sum / match.size();
-}
-
-std::tuple<NominalRoom, Match, float> SpecificWorker::compute_match(const Corners &corners)
-{
-	std::vector<std::tuple<NominalRoom, Match, float>> matches;
-	for (const auto &nominal_room : nominal_rooms) {
-		auto match = hungarian.match(corners, nominal_room.transform_corners_to(robot_pose.inverse()));
-		matches.push_back({nominal_room,
-			match,
-			compute_match_error(match)});
-	}
-	auto it = std::ranges::min_element(matches, {}, [](auto &t){ return std::get<2>(t); });
-
-	return *it;
-}
-
-std::optional<std::pair<Eigen::Affine2f, float>> SpecificWorker::update_robot_pose(int room_index,
-																				  const Corners &corners,
+std::optional<std::pair<Eigen::Affine2f, float>> SpecificWorker::update_robot_pose(const RoboCompLidar3D::TPoints &data,
 																				  bool transform_corners)
 {
+	const auto &[corners, lines] = room_detector.compute_corners(data, to_draw, &viewer->scene);
 	// match corners  transforming first nominal corners to robot's frame
 	Match match;
 	if (transform_corners)
-		match = hungarian.match(corners, nominal_rooms[room_index].transform_corners_to(robot_pose.inverse()));
+		match = hungarian.match(corners, nominal_rooms[current_room].transform_corners_to(robot_pose.inverse()));
 	else
-		match = hungarian.match(corners, nominal_rooms[room_index].corners());
-
+		match = hungarian.match(corners, nominal_rooms[current_room].corners());
 
 	if (match.empty() or match.size() < 3)
 		return {};
 
-
 	const auto max_error_iter = std::ranges::max_element(match, [](const auto &a, const auto &b)
 	  { return std::get<2>(a) < std::get<2>(b); });
 
-
 	const auto max_match_error = std::get<2>(*max_error_iter);
-
 
 	// create matrices W and b for pose estimation
 	auto r = solve_pose(corners, match);
@@ -714,15 +606,13 @@ std::optional<std::pair<Eigen::Affine2f, float>> SpecificWorker::update_robot_po
 		return {};
 	}
 
-
 	auto r_pose_copy = robot_pose;
 	r_pose_copy.translate(Eigen::Vector2f(r(0), r(1)));
 	r_pose_copy.rotate(r[2]);
 	return {{r_pose_copy, max_match_error}};
 }
 
-void SpecificWorker::move_robot(float adv, float rot)
-{
+void SpecificWorker::move_robot(float adv, float rot) const {
 	this->omnirobot_proxy->setSpeedBase(0, adv, rot);
 }
 
@@ -750,7 +640,7 @@ Eigen::Vector3d SpecificWorker::solve_pose(const Corners &corners, const Match &
 	return r;
 }
 
-std::tuple<float, float> SpecificWorker::robot_controller(const Eigen::Vector2f &target) {
+std::tuple<float, float> SpecificWorker::robot_controller(const Eigen::Vector2f &target) const {
 	float distance = target.norm(); //Distancia euclidea
 
 	auto x = target.x();

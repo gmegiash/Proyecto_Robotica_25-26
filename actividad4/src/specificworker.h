@@ -107,41 +107,44 @@ private:
 
 	struct Params
 	{
-		float ROBOT_WIDTH = 460;  // mm
-		float ROBOT_LENGTH = 480;  // mm
-		float ROBOT_SECTION = ROBOT_LENGTH/2 + 75;
-		float WIDTH_DISTANCES = 40;
-		float MAX_ADV_SPEED = 1000; // mm/s
-		float MAX_ROT_SPEED = 1; // rad/s
-		float MAX_SIDE_SPEED = 50; // mm/s
-		float MAX_TRANSLATION = 500; // mm/s
-		float MAX_ROTATION = 0.2;
-		float STOP_THRESHOLD = 700; // mm
-		float ADVANCE_THRESHOLD = ROBOT_WIDTH * 3; // mm
-		float LIDAR_FRONT_SECTION = 0.2; // rads, aprox 12 degrees
+		const float ROBOT_WIDTH = 460;  // mm
+		const float ROBOT_LENGTH = 480;  // mm
+		const float ROBOT_SECTION = ROBOT_LENGTH/2 + 75;
+		const float WIDTH_DISTANCES = 40;
+		const float MAX_ADV_SPEED = 1000; // mm/s
+		const float MAX_ROT_SPEED = 1; // rad/s
+		const float MAX_SIDE_SPEED = 50; // mm/s
+		const float MAX_TRANSLATION = 500; // mm/s
+		const float MAX_ROTATION = 0.2;
+		const float STOP_THRESHOLD = 700; // mm
+		const float ADVANCE_THRESHOLD = ROBOT_WIDTH * 3; // mm
+		const float LIDAR_FRONT_SECTION = 0.2; // rads, aprox 12 degrees
 		// wall
-		float LIDAR_RIGHT_SIDE_SECTION = M_PI/3; // rads, 90 degrees
-		float LIDAR_LEFT_SIDE_SECTION = -M_PI/3; // rads, 90 degrees
-		float WALL_MIN_DISTANCE = ROBOT_WIDTH*1.2;
+		const float LIDAR_RIGHT_SIDE_SECTION = M_PI/3; // rads, 90 degrees
+		const float LIDAR_LEFT_SIDE_SECTION = -M_PI/3; // rads, 90 degrees
+		const float WALL_MIN_DISTANCE = ROBOT_WIDTH*1.2;
 		// match error correction
-		float MATCH_ERROR_SIGMA = 150.f; // mm
-		float DOOR_REACHED_DIST = 750.f;
-		std::string LIDAR_NAME_LOW = "bpearl";
-		std::string LIDAR_NAME_HIGH = "helios";
-		QRectF GRID_MAX_DIM{-5000, 2500, 10000, -5000};
+		const float MATCH_ERROR_SIGMA = 150.f; // mm
+		const float DOOR_REACHED_DIST = 50.f;
+		const std::string LIDAR_NAME_LOW = "bpearl";
+		const std::string LIDAR_NAME_HIGH = "helios";
+		const QRectF GRID_MAX_DIM{-5000, 2500, 10000, -5000};
 
 		// relocalization
-		float RELOCAL_CENTER_EPS = 50.f;    // mm: stop when |mean| < eps
-		float RELOCAL_KP = 0.002f;           // gain to convert mean (mm) -> speed (magnitude)
-		float RELOCAL_MAX_ADV = 300.f;       // mm/s cap while re-centering
-		float RELOCAL_MAX_SIDE = 300.f;      // mm/s cap while re-centering
-		float RELOCAL_ROT_SPEED = 0.3f;     // rad/s while aligning
-		float RELOCAL_DELTA = 3.0f * M_PI/180.f; // small probe angle in radians
-		float RELOCAL_MATCH_MAX_DIST = 2000.f;   // mm for Hungarian gating
-		float RELOCAL_DONE_COST = 500.f;
-		float RELOCAL_DONE_MATCH_MAX_ERROR = 1000.f;
-		float RELOCAL_MAX_ORIENTED_ERROR = 0.1f; // ~5 grados, error permitido para encarar la puerta
-		const int DIST_TARGET_BEFORE_DOOR = 500;
+		const float RELOCAL_CENTER_EPS = 50.f;    // mm: stop when |mean| < eps
+		const float RELOCAL_KP = 0.002f;           // gain to convert mean (mm) -> speed (magnitude)
+		const float RELOCAL_MAX_ADV = 300.f;       // mm/s cap while re-centering
+		const float RELOCAL_MAX_SIDE = 300.f;      // mm/s cap while re-centering
+		const float RELOCAL_ROT_SPEED = 0.3f;     // rad/s while aligning
+		const float RELOCAL_DELTA = 3.0f * M_PI/180.f; // small probe angle in radians
+		const float RELOCAL_MATCH_MAX_DIST = 2000.f;   // mm for Hungarian gating
+		const float RELOCAL_DONE_COST = 500.f;
+		const float RELOCAL_DONE_MATCH_MAX_ERROR = 1000.f;
+		const float RELOCAL_MAX_ORIENTED_ERROR = 0.03f; // ~5 grados, error permitido para encarar la puerta
+		const float DIST_TARGET_BEFORE_DOOR = 1000.f;
+
+		const int BLIND_CROSS_TIME = 3000; // ms
+		const float BLIND_ADV_VELOCITY = 500; // mm/s
 	};
 	Params params;
 
@@ -158,6 +161,7 @@ private:
 	rc::Hungarian hungarian;
 	rc::PointcloudCenterEstimator center_estimator;
 	std::optional<Eigen::Vector2d> estimated_center;
+	int current_room = -1;
 
 	// state machine
 	enum class STATE {GOTO_DOOR, ORIENT_TO_DOOR, GOTO_ROOM_CENTER, TURN, IDLE, CROSS_DOOR, LOCALISE};
@@ -177,27 +181,25 @@ private:
 	STATE state = STATE::IDLE;
 	using RetVal = std::tuple<STATE, float, float>;
 
-	RetVal goto_door(const RoboCompLidar3D::TPoints &points, const Door &door);
-	RetVal turn();
-	RetVal orient_to_door(const RoboCompLidar3D::TPoints &points, const Door &door);
-	RetVal goto_room_center(const RoboCompLidar3D::TPoints &points);
-	RetVal cross_door(const RoboCompLidar3D::TPoints &points, const Door &door);
+	RetVal goto_door(const RoboCompLidar3D::TPoints &points);
+	RetVal turn(const RoboCompLidar3D::TPoints &points);
+	RetVal orient_to_door(const RoboCompLidar3D::TPoints &points);
+	RetVal goto_room_center();
+	RetVal cross_door(const RoboCompLidar3D::TPoints &points);
 	RetVal update_pose(const Corners &corners, const Match &match);
 	RetVal localise(const RoboCompLidar3D::TPoints &points, QGraphicsScene *scene);
-	RetVal process_state(const RoboCompLidar3D::TPoints &data, const Door &door);
+	RetVal process_state(const RoboCompLidar3D::TPoints &points);
 
 	// draw
-	void draw_lidar(const auto &points, std::optional<Eigen::Vector2d> center_opt, QGraphicsScene *scene);
+	std::vector<QGraphicsItemGroup*> to_draw;
+	void draw_lidar(const auto &points, QGraphicsScene *scene);
+	void draw_room_center(QGraphicsScene *scene);
 	void update_robot_position();
-	void draw_current_room(const NominalRoom &room, QGraphicsScene *scene);
+	void draw_current_room(QGraphicsScene *scene);
+	void draw_controller();
 
 	// aux
 	RoboCompLidar3D::TPoints read_data();
-	void print_match(const Match &match, const float error =1.f) const;
-
-	// DoubleBuffer for velocity commands
-	DoubleBuffer<std::tuple<float, float, float, long>, std::tuple<float, float, float, long>> commands_buffer;
-	std::tuple<float, float, float, long> last_velocities{0.f, 0.f, 0.f, 0.f};
 
 	// plotter
 	std::unique_ptr<TimeSeriesPlotter> time_series_plotter;
@@ -205,15 +207,13 @@ private:
 
 	// doors
 	DoorDetector door_detector;
+	int current_door = -1;
 
 	// image processor
 	rc::ImageProcessor image_processor;
 
 	// timing
 	std::chrono::time_point<std::chrono::high_resolution_clock> last_time = std::chrono::high_resolution_clock::now();
-
-	int current_room = -1;
-	int current_door = -1;
 
 	// relocalization
 	bool relocal_centered = false;
@@ -222,18 +222,14 @@ private:
 	//new door crossing detector
 	DoorCrossing door_crossing; //used the file in beta-robotica-class
 
-
-	float compute_match_error(const Match &match);
-	std::tuple<NominalRoom, Match, float> compute_match(const Corners &corners);
-
-	int choose_next_door(int room_idx) const;
+	[[nodiscard]]unsigned long choose_next_door() const;
 
 
-	std::optional<std::pair<Eigen::Affine2f, float>> update_robot_pose(int room_index, const Corners &corners, bool transform_corners);
-	void move_robot(float adv, float rot);
-	Eigen::Vector3d solve_pose(const Corners &corners, const Match &match);
-	void predict_robot_pose();
-	std::tuple<float, float> robot_controller(const Eigen::Vector2f &target);
+	std::optional<std::pair<Eigen::Affine2f, float>> update_robot_pose(const RoboCompLidar3D::TPoints &data, bool transform_corners);
+	void move_robot(float adv, float rot) const;
+
+	static Eigen::Vector3d solve_pose(const Corners &corners, const Match &match);
+	std::tuple<float, float> robot_controller(const Eigen::Vector2f &target) const;
 
 	/**
      * \brief Flag indicating whether startup checks are enabled.

@@ -13,13 +13,13 @@
 namespace rc
 {
     // par lines and rooms are commented. Lines have to be at least of half-room size
-    std::tuple<Corners, Lines> Room_Detector::compute_corners(const std::vector<Eigen::Vector2d> &line, QGraphicsScene *scene)
+    std::tuple<Corners, Lines> Room_Detector::compute_corners(const std::vector<Eigen::Vector2d> &line, std::vector<QGraphicsItemGroup*> &to_draw, QGraphicsScene *scene)
     {
         const std::vector<Eigen::Vector2d> floor_line_cart = line;
 
         // compute lines
         auto  lines = RansacLineDetector::detect_lines(floor_line_cart);
-        if (scene != nullptr) draw_lines_on_2D_tab(lines, scene);
+        if (scene != nullptr) draw_lines_on_2D_tab(lines, scene, to_draw);
 
         // compute corners
         Corners corners = get_corners(lines);
@@ -28,21 +28,21 @@ namespace rc
         corners = select_minimal_rectangle(corners);
 
         if (scene != nullptr)
-            draw_corners_on_2D_tab(corners, {Eigen::Vector2d{0,0}}, scene);
+            draw_corners_on_2D_tab(corners, {Eigen::Vector2d{0,0}}, scene, to_draw);
         current_walls = lines;  // update cached walls
         return {corners, lines};  // TODO return only lines that form corners
     }
-    std::tuple<Corners, Lines> Room_Detector::compute_corners(const std::vector<Eigen::Vector3d> &line, QGraphicsScene *scene)
+    std::tuple<Corners, Lines> Room_Detector::compute_corners(const std::vector<Eigen::Vector3d> &line,std::vector<QGraphicsItemGroup*> &to_draw, QGraphicsScene *scene)
     {
         std::vector<Eigen::Vector2d> line2d;
         std::ranges::transform(line, std::back_inserter(line2d), [](const auto &p){return p.head(2);});
-        return compute_corners(line2d, scene);
+        return compute_corners(line2d, to_draw, scene);
     }
-    std::tuple<Corners, Lines> Room_Detector::compute_corners(const RoboCompLidar3D::TPoints &points,  QGraphicsScene *scene)
+    std::tuple<Corners, Lines> Room_Detector::compute_corners(const RoboCompLidar3D::TPoints &points,std::vector<QGraphicsItemGroup*> &to_draw,  QGraphicsScene *scene)
     {
         std::vector<Eigen::Vector2d> line2d;
         std::ranges::transform(points, std::back_inserter(line2d), [](const auto &p){return Eigen::Vector2d{p.x, p.y};});
-        return compute_corners(line2d,  scene);
+        return compute_corners(line2d, to_draw, scene);
     }
 
      ////////////////////////////////////////////////
@@ -106,49 +106,41 @@ namespace rc
                          return length >= threshold;});
         return filtered_lines;
     }
-    void Room_Detector::draw_lines_on_2D_tab(const Lines &lines, QGraphicsScene *scene)
+    void Room_Detector::draw_lines_on_2D_tab(const Lines &lines, QGraphicsScene *scene, std::vector<QGraphicsItemGroup*> &to_draw)
     {
-        static std::vector<QGraphicsItem*> lines_vec;
-        for (const auto l: lines_vec)
-        {
-            scene->removeItem(l);
-            delete l;
-        }
-        lines_vec.clear();
-
+        const auto lines_group = scene->createItemGroup({});
+        to_draw.push_back(lines_group);
+        lines_group->hide();
         const QPen pen(QColor("orange"), 20);
         for(const auto &l : lines)
         {
-            auto ql = l.toQLineF();
-            const auto p = scene->addLine(ql, pen);
-            lines_vec.push_back(p);
+            const auto line_item = new QGraphicsLineItem(l.toQLineF(),lines_group);
+            line_item->setPen(pen);
         }
     }
     void Room_Detector::draw_corners_on_2D_tab(const Corners &corners, const std::vector<Eigen::Vector2d> &model_corners,
-                                               QGraphicsScene *scene)
+                                               QGraphicsScene *scene, std::vector<QGraphicsItemGroup*> &to_draw)
     {
-        static std::vector<QGraphicsItem*> items;
-        for (const auto &i: items)
-        {
-            scene->removeItem(i);
-            delete i;
-        }
-        items.clear();
+        const auto cornes_group = scene->createItemGroup({});
+        to_draw.push_back(cornes_group);
+        cornes_group->hide();
 
         const QColor color("darkMagenta");
         for(const auto &[p, _, __] : corners)
         {
-            const auto i = scene->addEllipse(-100, -100, 200, 200, QPen(color), QBrush(color));
-            i->setPos(p.x(), p.y());
-            items.push_back(i);
+            const auto item = new QGraphicsEllipseItem(-100,-100,200,200, cornes_group);
+            item->setPos(p.x(), p.y());
+            item->setPen(QPen(color));
+            item->setBrush(color);
         }
         //model corners
         QColor ccolor("cyan");
         for(const auto &[m, c] : iter::zip(model_corners, corners))
         {
-            auto p = scene->addEllipse(-100, -100, 200, 200, QPen(ccolor), QBrush(ccolor));
-            p->setPos(m.x(), m.y());
-            items.push_back(p);
+            const auto item = new QGraphicsEllipseItem(-100,-100,200,200, cornes_group);
+            item->setPos(m.x(), m.y());
+            item->setPen(ccolor);
+            item->setBrush(ccolor);
         }
     }
 

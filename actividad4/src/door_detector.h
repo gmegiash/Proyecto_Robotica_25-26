@@ -27,9 +27,9 @@ public:
 
 private:
     Doors doors_cache;
-    float min_door_width = 600.f;  // mm
-    float max_door_width = 1200.f;
-    float min_peak_distance = 500.f;
+    const float min_door_width = 600.f;  // mm
+    const float max_door_width = 1200.f;
+    const float min_peak_distance = 500.f;
 
     static bool is_ccw(const Eigen::Vector2f &a, const Eigen::Vector2f &b, const Eigen::Vector2f &c);
     static bool segment_intersects_door(const Door &door, const Eigen::Vector2f &start, const Eigen::Vector2f &end);

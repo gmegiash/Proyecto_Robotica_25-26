@@ -13,7 +13,7 @@
             int leaving_door_index = -1;
             int entering_room_index = -1;
             int entering_door_index = -1;
-            bool valid = false;                             // only true if both leaving and entering data are set
+            bool valid = false;                             // only true if leaving data are set
             DoorCrossing() = default;                       // attribs take default values
             DoorCrossing(int room_index, int door_index)    // leaving room and door are initialized
                 : leaving_room_index{room_index}, leaving_door_index{door_index} { valid = true; }
@@ -24,8 +24,15 @@
             {
                 if (doors.empty()) return;
                 // find the door whose center is closest to the leaving door center in local coordinates
-                leaving_door_center = std::ranges::min_element(doors, [d =leaving_door_center](const auto &a, const auto &b)
+                const auto it = std::ranges::min_element(doors, [d =leaving_door_center](const auto &a, const auto &b)
                 { return (a.center()-d).norm() < (b.center()-d).norm();})->center();
+
+                float jump_distance = (it - leaving_door_center).norm();
+
+                if (jump_distance < 500.0f) // 50 cm de margen
+                {
+                    leaving_door_center = it; // Actualizamos solo si es coherente
+                }
             }
 
             // // compute and store entering room and door indices using the tracked leaving_door_center
@@ -39,6 +46,7 @@
                     qWarning() << __FUNCTION__ << "empty nominal doors for room" << room_index;
                     return;
                 }
+
                 const auto closest_door = std::ranges::min_element(nominal_doors, [this](const auto &a, const auto &b)
                 { return (a.center_global() - leaving_door_center).norm() < (b.center_global() - leaving_door_center).norm(); });
                 entering_door_index = static_cast<int>(std::distance(nominal_doors.begin(), closest_door));

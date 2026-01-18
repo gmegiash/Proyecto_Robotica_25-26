@@ -32,9 +32,9 @@ namespace rc   // aka RoboComp
     class Room_Detector
     {
         public:
-             std::tuple<Corners, Lines> compute_corners(const std::vector<Eigen::Vector2d> &line, QGraphicsScene *scene= nullptr);
-             std::tuple<Corners, Lines> compute_corners(const std::vector<Eigen::Vector3d> &line, QGraphicsScene *scene= nullptr);
-             std::tuple<Corners, Lines> compute_corners(const RoboCompLidar3D::TPoints &points, QGraphicsScene *scene= nullptr);
+             std::tuple<Corners, Lines> compute_corners(const std::vector<Eigen::Vector2d> &line, std::vector<QGraphicsItemGroup*> &to_draw, QGraphicsScene *scene= nullptr);
+             std::tuple<Corners, Lines> compute_corners(const std::vector<Eigen::Vector3d> &line,std::vector<QGraphicsItemGroup*> &to_draw, QGraphicsScene *scene= nullptr);
+             std::tuple<Corners, Lines> compute_corners(const RoboCompLidar3D::TPoints &points, std::vector<QGraphicsItemGroup*> &to_draw, QGraphicsScene *scene= nullptr);
              Eigen::Vector3d estimate_room_sizes(const Eigen::Vector2d &room_center, std::vector<Eigen::Vector2d> &floor_line_cart);
              Corners get_corners(Lines &elines);
              Lines filter_lines_by_length(const Lines &lines, float threshold );
@@ -45,8 +45,8 @@ namespace rc   // aka RoboComp
              [[nodiscard]]  std::vector<Center> reorder_points_CCW(const std::vector<Center> &points);
 
             // draw
-             void draw_lines_on_2D_tab(const Lines &lines, QGraphicsScene *scene);
-             void draw_corners_on_2D_tab(const Corners &corners, const std::vector<Eigen::Vector2d> &model_corners, QGraphicsScene *scene);
+             void draw_lines_on_2D_tab(const Lines &lines, QGraphicsScene *scene, std::vector<QGraphicsItemGroup*> &to_draw);
+             void draw_corners_on_2D_tab(const Corners &corners, const std::vector<Eigen::Vector2d> &model_corners, QGraphicsScene *scene, std::vector<QGraphicsItemGroup*> &to_draw);
 
             // local data
              Eigen::Vector2d to_eigen(const QPointF &p);
