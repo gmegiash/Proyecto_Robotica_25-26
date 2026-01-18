@@ -289,12 +289,9 @@ class SpecificWorker(GenericWorker):
     # Interfaz
     # -------------------------------------------------------------------------
     def MNIST_getNumber(self):
-        res = ifaces.RoboCompMNIST.TDigit()
-        res.detectedNumber = self.detected_number
-        res.x = self.detected_x_center
-        if res.detectedNumber != -1:
-            # Opcional: imprimir para debug
-            pass
+        res = ifaces.RoboCompMNIST.Res()
+        res.number = self.detected_number
+        res.centerx = self.detected_x_center
         return res
 
     def startup_check(self):

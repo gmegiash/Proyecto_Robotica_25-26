@@ -75,7 +75,7 @@ def train():
         print(f"✅ Epoch {epoch} Finalizada. Precisión en entrenamiento: {acc:.2f}%")
 
     # GUARDADO
-    save_path = "my_network_robust.pt"
+    save_path = "my_network.pt"
     torch.save(model.state_dict(), save_path)
     print(f"\n💾 Modelo guardado en: {os.path.abspath(save_path)}")
     print("⚠️  AHORA MUEVE ESTE ARCHIVO A TU CARPETA 'dnn' Y RENOMBRALO SI ES NECESARIO")
